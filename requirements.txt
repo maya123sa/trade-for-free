@@ -2,3 +2,5 @@ Flask
 flask_cors
 tradingview_ta
 gunicorn
+bs4
+
