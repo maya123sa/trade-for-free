@@ -1,13 +1,9 @@
-import json
 from flask import Flask, request, jsonify
 from tradingview_ta import TA_Handler, Interval
 
 app = Flask(__name__)
 
-# Load symbols once
-with open("assets/symbols.json") as f:
-    SYMBOLS = json.load(f)
-
+# Valid intervals
 INTERVAL_MAP = {
     "1m": Interval.INTERVAL_1_MINUTE,
     "5m": Interval.INTERVAL_5_MINUTES,
@@ -23,13 +19,6 @@ INTERVAL_MAP = {
 @app.route('/')
 def home():
     return "Stock Analyzer API is running."
-
-
-@app.route('/symbols', methods=['GET'])
-def get_symbols():
-    query = request.args.get('q', '').lower()
-    filtered = [s for s in SYMBOLS if query in s['symbol'].lower()]
-    return jsonify(filtered)
 
 
 @app.route('/analyze', methods=['POST'])
@@ -69,5 +58,43 @@ def analyze():
         return jsonify({"error": str(e)}), 500
 
 
+# Optional manual testing via console
+def run_manual_test():
+    symbol = input("Enter stock symbol (e.g., TATAMOTORS.NS): ").strip()
+    interval = input("Enter interval (e.g., 1d, 5m, 1h): ").strip()
+
+    interval_obj = INTERVAL_MAP.get(interval)
+    if not interval_obj:
+        print("❌ Invalid interval.")
+        return
+
+    try:
+        handler = TA_Handler(
+            symbol=symbol,
+            screener="india",
+            exchange="NSE",
+            interval=interval_obj
+        )
+        analysis = handler.get_analysis()
+        summary = analysis.summary
+        indicators = analysis.indicators
+
+        print("\n📊 Analysis Result:")
+        print("Recommendation:", summary.get("RECOMMENDATION", "N/A"))
+        print("BUY:", summary.get("BUY", 0))
+        print("NEUTRAL:", summary.get("NEUTRAL", 0))
+        print("SELL:", summary.get("SELL", 0))
+        print("\n🔍 Indicators:")
+        for key, value in indicators.items():
+            print(f"{key}: {value}")
+
+    except Exception as e:
+        print("❌ Error:", str(e))
+
+
 if __name__ == '__main__':
+    # Uncomment below if you want to run the API server
     app.run(debug=True)
+
+    # Or uncomment below if you want to test it from terminal directly
+    # run_manual_test()
