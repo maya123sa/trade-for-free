@@ -1,3 +1,4 @@
-Flask==2.3.3
-tradingview_ta==3.2.6
-gunicorn==21.2.0
+Flask
+flask_cors
+tradingview_ta
+gunicorn
