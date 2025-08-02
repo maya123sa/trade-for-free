@@ -7,7 +7,7 @@ import pandas as pd
 import yfinance as yf
 import matplotlib.pyplot as plt
 import mplfinance as mpf
-import pandas_ta as ta
+import pandas-ta-openbb as ta
 from flask import Flask, request, jsonify, send_file
 from io import BytesIO
 from datetime import datetime, timedelta
