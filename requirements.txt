@@ -1,7 +1,11 @@
-Flask
-flask_cors
-tradingview_ta
-gunicorn
+flask
 requests
-beautifulsoup4
-
+numpy
+pandas
+yfinance
+matplotlib
+mplfinance
+pandas-ta
+scikit-learn
+python-dotenv
+tradingview-ta
