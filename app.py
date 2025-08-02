@@ -496,11 +496,11 @@ def get_ai_recommendation(symbol, interval, analysis_data):
     3. Key Technical Drivers
     4. Price Targets (1W/1M/3M)
     5. Risk-Managed Trading Plan:
-       - Entry Zones
-       - Position Sizing
-       - Stop-Loss Strategy
-       - Profit Targets
-       - Hedging Recommendations
+        - Entry Zones
+        - Position Sizing
+        - Stop-Loss Strategy
+        - Profit Targets
+        - Hedging Recommendations
 
     Respond in JSON format matching the schema.
     """
@@ -622,7 +622,7 @@ def analyze_stock():
         'momentum_summary': "Increasing" if df['rsi_14'].iloc[-1] > 50 else "Decreasing",
         'volume_profile_summary': "Accumulation" if df['obv'].iloc[-1] > df['obv'].iloc[-5] else "Distribution",
         'volatility_class': "High" if df['atr_14'].iloc[-1] > current_price * 0.02 else "Low",
-        'atr_value': df['atr_14'].iloc[-1],
+        'atr_value': df['atr_14'].iloc[-1] if 'atr_14' in df.columns else 0,
         'tv_recommendation': get_tradingview_recommendation(tv_analysis)
     }
     
@@ -651,7 +651,7 @@ def analyze_stock():
                 "divergence": "None",
                 "oscillators": [
                     f"RSI: {df['rsi_14'].iloc[-1]:.1f}" if 'rsi_14' in df.columns else "RSI: N/A",
-                    f"Stoch: {df['stochk_14_3'].iloc[-1]:.1f}/{df['stochd_14_3'].iloc[-1]:.1f}" 
+                    f"Stoch: {df['stochk_14_3'].iloc[-1]:.1f}/{df['stochd_14_3'].iloc[-1]:.1f}"
                     if 'stochk_14_3' in df.columns else "Stochastic: N/A"
                 ]
             },
