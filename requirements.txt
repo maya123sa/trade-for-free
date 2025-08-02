@@ -1,13 +1,33 @@
-Flask
-gunicorn
-requests
-numpy
-pandas
-yfinance
-matplotlib
-mplfinance
-pandas_ta
-scikit-learn
-python-dotenv
-tradingview_ta
-gevent
+Here is an updated `requirements.txt` file with the latest stable versions as of today, with a crucial fix for the known `numpy` and `pandas_ta` compatibility issue.
+
+### Updated `requirements.txt`
+
+```
+# Web server and framework
+Flask==3.0.3
+gunicorn==22.0.0
+gevent==24.2.1
+
+# Data handling and analysis
+# Note: numpy>=2.0.0 is not yet compatible with pandas_ta.
+# Pinning to a stable version to prevent a deployment crash.
+numpy==1.26.4
+pandas==2.2.2
+
+# Stock data and plotting
+yfinance==0.2.40
+matplotlib==3.9.1
+mplfinance==0.12.10b0
+
+# Technical analysis library
+# Pinning pandas_ta to a version compatible with numpy==1.26.4
+pandas_ta==0.3.14b0
+
+# Machine learning
+scikit-learn==1.5.0
+
+# Third-party integrations and utilities
+requests==2.32.3
+python-dotenv==1.0.1
+tradingview_ta==3.3.0
+```
