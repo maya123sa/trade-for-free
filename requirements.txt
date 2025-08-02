@@ -9,3 +9,4 @@ pandas-ta-openbb
 scikit-learn
 python-dotenv
 tradingview-ta
+gunicorn
