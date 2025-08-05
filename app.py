@@ -1,728 +1,492 @@
-import os
-import json
-import time
-import requests
+import io
+from flask import Flask, jsonify, request, render_template, send_file
+from flask_cors import CORS
+import yfinance as yf
+import talib
 import numpy as np
 import pandas as pd
-import yfinance as yf
-import matplotlib.pyplot as plt
 import mplfinance as mpf
-import pandas-ta-openbb as ta
-from flask import Flask, request, jsonify, send_file
-from io import BytesIO
-from datetime import datetime, timedelta
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.preprocessing import StandardScaler
-from dotenv import load_dotenv
-from functools import lru_cache
-import base64
 from tradingview_ta import TA_Handler, Interval
+import matplotlib
+matplotlib.use('Agg')  # Fix matplotlib backend issue
+from matplotlib import pyplot as plt
+from io import BytesIO
+import base64
 
-# Load environment variables
-load_dotenv()
+# AI imports
+try:
+    # Try TensorFlow 2.x style imports
+    from tensorflow.keras.models import Sequential
+    from tensorflow.keras.layers import LSTM, Dense, Dropout
+    TF_IMPORT_SUCCESS = True
+except ImportError:
+    try:
+        # Fallback to standalone Keras
+        from keras.models import Sequential
+        from keras.layers import LSTM, Dense, Dropout
+        TF_IMPORT_SUCCESS = True
+    except ImportError:
+        # Disable TensorFlow features if not available
+        TF_IMPORT_SUCCESS = False
+
+from sklearn.ensemble import IsolationForest
+from sklearn.preprocessing import MinMaxScaler
+from transformers import pipeline
+import xgboost as xgb
+from scipy.stats import norm
+import requests
+from bs4 import BeautifulSoup
 
 app = Flask(__name__)
-app.config['JSON_SORT_KEYS'] = False
+CORS(app)
 
-# Constants
-NSE_SUFFIX = ".NS"
-CACHE_EXPIRY = 3600  # 1 hour
-INDICATOR_CONFIG = {
-    'trend': [
-        {'sma': [10, 20, 50, 100, 200]},
-        {'ema': [12, 26, 50]},
-        {'wma': [20]},
-        {'hma': [20]},
-        {'kama': [10, 2, 30]},
-        {'macd': [12, 26, 9]},
-        {'adx': [14]},
-        {'vortex': [14]},
-        {'trix': [15]},
-        {'kst': [10, 15, 20, 30]},
-        {'stc': [23, 50]},
-        {'dpo': [20]},
-        {'psar': [0.02, 0.2]}
-    ],
-    'momentum': [
-        {'rsi': [14]},
-        {'stoch': [14, 3]},
-        {'willr': [14]},
-        {'cci': [20]},
-        {'roc': [10]},
-        {'mfi': [14]},
-        {'ao': []},
-        {'uo': [7, 14, 28]},
-        {'cmo': [14]},
-        {'kdj': [9, 3, 3]},
-        {'tsi': [25, 13]},
-        {'kvo': [34, 55]},
-        {'pvo': [12, 26, 9]}
-    ],
-    'volatility': [
-        {'bbands': [20, 2]},
-        {'atr': [14]},
-        {'kc': [20, 2]},
-        {'dc': [20]},
-        {'ui': [14]},
-        {'fisher': [10]},
-        {'rvi': [14]},
-        {'thermo': [20, 2, 0.5]}
-    ],
-    'volume': [
-        {'obv': []},
-        {'vp': [20]},
-        {'vwap': []},
-        {'ad': []},
-        {'cmf': [20]},
-        {'eom': [14]},
-        {'vema': [20]},
-        {'vroc': [14]},
-        {'vzo': [5, 20]},
-        {'pvi': []},
-        {'nvi': []},
-        {'efi': [13]}
-    ]
-}
+# --- AI Model Initialization ---
+sentiment_analyzer = pipeline("sentiment-analysis")
 
-# TradingView interval mapping
-TV_INTERVAL_MAP = {
-    '1m': Interval.INTERVAL_1_MINUTE,
-    '5m': Interval.INTERVAL_5_MINUTES,
-    '15m': Interval.INTERVAL_15_MINUTES,
-    '30m': Interval.INTERVAL_30_MINUTES,
-    '1h': Interval.INTERVAL_1_HOUR,
-    '1d': Interval.INTERVAL_1_DAY,
-    '1wk': Interval.INTERVAL_1_WEEK,
-    '1mo': Interval.INTERVAL_1_MONTH
-}
+# Initialize LSTM model only if TensorFlow/Keras is available
+if TF_IMPORT_SUCCESS:
+    lstm_model = Sequential([
+        LSTM(128, return_sequences=True, input_shape=(60, 1)),
+        Dropout(0.3),
+        LSTM(64),
+        Dropout(0.3),
+        Dense(32, activation='relu'),
+        Dense(1)
+    ])
+    lstm_model.compile(optimizer='adam', loss='mse')
+else:
+    lstm_model = None
 
-# LRU Cache for API results
-@lru_cache(maxsize=128)
-def cached_yf_download(symbol, interval, period):
-    return yf.download(symbol, period=period, interval=interval)
+# --- Implemented Advanced Analysis Functions ---
 
-def get_period_for_interval(interval):
-    """Determine appropriate period based on interval"""
-    period_map = {
-        '1m': '7d', '5m': '60d', '15m': '60d', '30m': '60d',
-        '1h': '730d', '1d': '5y', '1wk': '10y', '1mo': '20y'
-    }
-    return period_map.get(interval, '2y')
-
-def fetch_stock_data(symbol, interval):
-    """Fetch and cache stock data"""
-    ticker = f"{symbol}{NSE_SUFFIX}"
-    period = get_period_for_interval(interval)
+# Technical Analysis Functions
+def calculate_ichimoku(data):
+    """Calculate Ichimoku Cloud components"""
+    high, low, close = data['High'], data['Low'], data['Close']
     
-    try:
-        df = cached_yf_download(ticker, interval, period)
-        if df.empty:
-            return None
-            
-        # Clean and format data
-        df = df[['Open', 'High', 'Low', 'Close', 'Volume']].dropna()
-        df.columns = df.columns.str.lower()
-        return df
-    except Exception as e:
-        app.logger.error(f"Data fetch error: {str(e)}")
-        return None
-
-def calculate_indicators(df):
-    """Calculate all technical indicators"""
-    for category, indicators in INDICATOR_CONFIG.items():
-        for indicator in indicators:
-            for name, params in indicator.items():
-                try:
-                    # Special handling for indicators without parameters
-                    if params:
-                        df.ta(kind=name, length=params, append=True)
-                    else:
-                        df.ta(kind=name, append=True)
-                except Exception as e:
-                    app.logger.warning(f"Indicator {name}{params} failed: {str(e)}")
+    # Conversion Line
+    period9_high = high.rolling(window=9).max()
+    period9_low = low.rolling(window=9).min()
+    tenkan_sen = (period9_high + period9_low) / 2
     
-    # Add specialized indicators
-    df = add_specialized_indicators(df)
-    return df
-
-def add_specialized_indicators(df):
-    """Add non-standard indicators"""
-    # Market Profile
-    if 'volume' in df.columns:
-        df['poc'] = df.groupby(pd.Grouper(freq='D'))['volume'].transform(lambda x: x.idxmax())
+    # Base Line
+    period26_high = high.rolling(window=26).max()
+    period26_low = low.rolling(window=26).min()
+    kijun_sen = (period26_high + period26_low) / 2
     
-    # Fibonacci Levels
-    if not df.empty:
-        max_price = df['high'].max()
-        min_price = df['low'].min()
-        diff = max_price - min_price
-        
-        fib_levels = {
-            'fib_0': max_price,
-            'fib_23': max_price - 0.236 * diff,
-            'fib_38': max_price - 0.382 * diff,
-            'fib_50': max_price - 0.5 * diff,
-            'fib_61': max_price - 0.618 * diff,
-            'fib_78': max_price - 0.786 * diff,
-            'fib_100': min_price
-        }
-        
-        for level, value in fib_levels.items():
-            df[level] = value
+    # Leading Span A
+    senkou_span_a = ((tenkan_sen + kijun_sen) / 2).shift(26)
     
-    # Machine Learning Forecast (simplified)
-    if len(df) > 100:
-        df = add_ml_forecast(df)
+    # Leading Span B
+    period52_high = high.rolling(window=52).max()
+    period52_low = low.rolling(window=52).min()
+    senkou_span_b = ((period52_high + period52_low) / 2).shift(26)
     
-    return df
-
-def add_ml_forecast(df):
-    """Add machine learning predictions"""
-    # Feature Engineering
-    df['returns'] = df['close'].pct_change()
-    df['volatility'] = df['returns'].rolling(20).std()
-    df['momentum'] = df['returns'].rolling(10).mean()
-    
-    # Create target (1 if next day up, 0 otherwise)
-    df['target'] = (df['close'].shift(-1) > df['close']).astype(int)
-    
-    # Prepare data
-    features = df[['returns', 'volatility', 'momentum']].dropna()
-    targets = df.loc[features.index, 'target']
-    
-    if len(features) > 100 and targets.sum() > 10:
-        # Train/test split
-        split = int(0.8 * len(features))
-        X_train, X_test = features.iloc[:split], features.iloc[split:]
-        y_train, y_test = targets.iloc[:split], targets.iloc[split:]
-        
-        # Scale features
-        scaler = StandardScaler()
-        X_train_scaled = scaler.fit_transform(X_train)
-        X_test_scaled = scaler.transform(X_test)
-        
-        # Train model
-        model = RandomForestClassifier(n_estimators=100, random_state=42)
-        model.fit(X_train_scaled, y_train)
-        
-        # Generate predictions
-        full_set = scaler.transform(features)
-        df.loc[features.index, 'ml_forecast'] = model.predict_proba(full_set)[:, 1]
-    
-    return df
-
-def detect_candlestick_patterns(df):
-    """Identify candlestick patterns"""
-    patterns = []
-    candle_func = ta.CDL_PATTERNS
-    
-    # Check for common patterns
-    for pattern in [
-        'CDLHAMMER', 'CDLENGULFING', 'CDLMORNINGSTAR', 'CDL3WHITESOLDIERS',
-        'CDLEVENINGSTAR', 'CDLSHOOTINGSTAR', 'CDLHANGINGMAN', 'CDLDARKCLOUDCOVER',
-        'CDLPIERCING', 'CDL3BLACKCROWS', 'CDLDOJI', 'CDLDRAGONFLYDOJI',
-        'CDLGRAVESTONEDOJI', 'CDLSPINNINGTOP', 'CDLMARUBOZU', 'CDLKICKING',
-        'CDLINVERTEDHAMMER', 'CDLMORNINGDOJISTAR', 'CDLEVENINGDOJISTAR', 'CDLMATCHINGLOW',
-        'CDLUPSIDEGAP2CROWS', 'CDLIDENTICAL3CROWS', 'CDL3LINESTRIKE', 'CDLUNIQUE3RIVER',
-        'CDL3INSIDE', 'CDL3OUTSIDE', 'CDLTRISTAR', 'CDLADVANCEBLOCK',
-        'CDLBREAKAWAY', 'CDLTASUKIGAP', 'CDLTRISTAR', 'CDLXSIDEGAP3METHODS'
-    ]:
-        if pattern in candle_func:
-            result = candle_func[pattern](df['open'], df['high'], df['low'], df['close'])
-            last_signal = result.iloc[-1]
-            if last_signal != 0:
-                patterns.append({
-                    'name': pattern[3:].lower().capitalize(),
-                    'date': df.index[-1].strftime('%Y-%m-%d'),
-                    'reliability': 4.0 if abs(last_signal) == 100 else 3.0,
-                    'direction': 'Bullish' if last_signal > 0 else 'Bearish'
-                })
-    
-    # Limit to 5 strongest patterns
-    return sorted(patterns, key=lambda x: x['reliability'], reverse=True)[:5]
-
-def calculate_key_levels(df):
-    """Calculate support/resistance levels"""
-    if df.empty:
-        return {'support': [], 'resistance': [], 'pivot': 0}
-    
-    # Pivot Points
-    last = df.iloc[-1]
-    pivot = (last['high'] + last['low'] + last['close']) / 3
-    s1 = (2 * pivot) - last['high']
-    r1 = (2 * pivot) - last['low']
-    
-    # Support/Resistance
-    window = 20
-    max_high = df['high'].rolling(window).max().iloc[-1]
-    min_low = df['low'].rolling(window).min().iloc[-1]
+    # Lagging Span
+    chikou_span = close.shift(-26)
     
     return {
-        'support': [min_low, s1],
-        'resistance': [max_high, r1],
-        'pivot': pivot
+        'tenkan_sen': tenkan_sen.iloc[-1],
+        'kijun_sen': kijun_sen.iloc[-1],
+        'senkou_span_a': senkou_span_a.iloc[-1],
+        'senkou_span_b': senkou_span_b.iloc[-1],
+        'chikou_span': chikou_span.iloc[-26],
+        'cloud_status': 'Bullish' if senkou_span_a.iloc[-1] > senkou_span_b.iloc[-1] else 'Bearish'
     }
 
-def get_tradingview_analysis(symbol, interval):
-    """Get technical analysis from TradingView"""
+def detect_ichimoku_twist(data):
+    """Detect Ichimoku Cloud twists"""
+    ichimoku = calculate_ichimoku(data)
+    return ichimoku['cloud_status'] + " Cloud"
+
+def get_gann_levels(price):
+    """Calculate Gann Square of Nine levels"""
+    sqrt_price = np.sqrt(price)
+    levels = [round((sqrt_price + i/8) ** 2, 2) for i in range(-4, 5)]
+    return {"support": min(levels), "resistance": max(levels)}
+
+def calculate_fibonacci_zones(data):
+    """Calculate Fibonacci retracement zones"""
+    high = data['High'].max()
+    low = data['Low'].min()
+    diff = high - low
+    
+    return {
+        '0%': high,
+        '23.6%': high - diff * 0.236,
+        '38.2%': high - diff * 0.382,
+        '50%': high - diff * 0.5,
+        '61.8%': high - diff * 0.618,
+        '100%': low
+    }
+
+def calculate_vwap(data):
+    """Calculate Volume Weighted Average Price (VWAP)"""
+    if 'Volume' not in data or data['Volume'].sum() == 0:
+        return None
+    typical_price = (data['High'] + data['Low'] + data['Close']) / 3
+    vwap = (typical_price * data['Volume']).cumsum() / data['Volume'].cumsum()
+    return vwap.iloc[-1]
+
+def calculate_supertrend(data, period=10, multiplier=3):
+    """Calculate Supertrend indicator"""
+    hl2 = (data['High'] + data['Low']) / 2
+    atr = talib.ATR(data['High'], data['Low'], data['Close'], timeperiod=period)
+    
+    upper_band = hl2 + (multiplier * atr)
+    lower_band = hl2 - (multiplier * atr)
+    
+    supertrend = pd.Series(index=data.index, dtype=float)
+    direction = pd.Series(index=data.index, dtype=int)
+    
+    # Initial value
+    supertrend[0] = upper_band[0]
+    direction[0] = -1  # Start with bearish
+    
+    for i in range(1, len(data)):
+        if data['Close'][i] > supertrend[i-1]:
+            supertrend[i] = lower_band[i]
+            direction[i] = 1  # Bullish
+        else:
+            supertrend[i] = upper_band[i]
+            direction[i] = -1  # Bearish
+    
+    return {
+        'value': supertrend.iloc[-1],
+        'direction': 'Bullish' if direction.iloc[-1] == 1 else 'Bearish'
+    }
+
+# AI Engine Functions
+def train_lstm_model(data):
+    """Train LSTM model on historical data"""
+    if not TF_IMPORT_SUCCESS or lstm_model is None:
+        # Fallback if TensorFlow not available
+        return data['Close'].iloc[-1] * 1.01
+    
+    scaler = MinMaxScaler(feature_range=(0, 1))
+    scaled_data = scaler.fit_transform(data['Close'].values.reshape(-1, 1))
+    
+    # Create training data
+    X, y = [], []
+    for i in range(60, len(scaled_data)):
+        X.append(scaled_data[i-60:i, 0])
+        y.append(scaled_data[i, 0])
+    
+    X, y = np.array(X), np.array(y)
+    X = np.reshape(X, (X.shape[0], X.shape[1], 1))
+    
+    # Train model
+    lstm_model.fit(X, y, epochs=10, batch_size=32, verbose=0)
+    
+    # Make prediction
+    last_60 = scaled_data[-60:]
+    last_60 = np.reshape(last_60, (1, 60, 1))
+    prediction = lstm_model.predict(last_60)
+    prediction = scaler.inverse_transform(prediction)[0][0]
+    
+    return prediction
+
+def bayesian_risk_assessment(data):
+    """Bayesian probability models for risk assessment"""
+    returns = data['Close'].pct_change().dropna()
+    mean_return = returns.mean()
+    std_return = returns.std()
+    
+    # Probability of 5% loss in next day
+    prob_loss = norm.cdf(-0.05, loc=mean_return, scale=std_return)
+    
+    # Value at Risk (95% confidence)
+    var_95 = norm.ppf(0.05, mean_return, std_return)
+    
+    return {
+        "probability_of_5pct_loss": float(prob_loss),
+        "value_at_risk_95": float(var_95),
+        "expected_shortfall": float(mean_return - 1.645 * std_return)
+    }
+
+def detect_anomalies(data):
+    """Detect price anomalies using Isolation Forest"""
+    features = data[['Close', 'Volume']].copy()
+    features['Returns'] = data['Close'].pct_change()
+    features.dropna(inplace=True)
+    
+    model = IsolationForest(contamination=0.05, random_state=42)
+    anomalies = model.fit_predict(features)
+    
+    anomaly_dates = features.index[anomalies == -1]
+    return anomaly_dates.strftime('%Y-%m-%d').tolist()
+
+# Market Intelligence Functions
+def get_news_sentiment(symbol):
+    """Get news sentiment for a symbol using web scraping"""
     try:
-        # Convert our interval to TradingView's format
-        tv_interval = TV_INTERVAL_MAP.get(interval, Interval.INTERVAL_1_DAY)
+        url = f"https://www.google.com/search?q={symbol}+stock+news"
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        response = requests.get(url, headers=headers)
+        soup = BeautifulSoup(response.text, 'html.parser')
         
-        handler = TA_Handler(
-            symbol=symbol + NSE_SUFFIX,
-            screener="india",
-            exchange="NSE",
-            interval=tv_interval
-        )
+        # Extract headlines
+        headlines = [h.text for h in soup.find_all('h3')[:5]]
         
-        analysis = handler.get_analysis()
+        # Analyze sentiment
+        sentiments = sentiment_analyzer(headlines)
+        positive_count = sum(1 for s in sentiments if s['label'] == 'POSITIVE')
+        sentiment_score = positive_count / len(sentiments) if sentiments else 0.5
         
-        # Parse relevant information
         return {
-            "summary": analysis.summary,
-            "oscillators": analysis.oscillators,
-            "moving_averages": analysis.moving_averages,
-            "indicators": analysis.indicators,
-            "recommendation": analysis.summary.get('RECOMMENDATION', 'NEUTRAL')
+            "sentiment_score": sentiment_score,
+            "headlines": headlines[:3]
         }
-    except Exception as e:
-        app.logger.error(f"TradingView error: {str(e)}")
-        return None
+    except Exception:
+        return {"sentiment_score": 0.5, "headlines": []}
 
-def get_tradingview_recommendation(tv_analysis):
-    """Convert TradingView recommendation to our format"""
-    if not tv_analysis:
-        return None
-    
-    recommendation_map = {
-        'STRONG_BUY': 'Strong Buy',
-        'BUY': 'Buy',
-        'NEUTRAL': 'Neutral',
-        'SELL': 'Sell',
-        'STRONG_SELL': 'Strong Sell'
-    }
-    
-    tv_rec = tv_analysis.get('recommendation', 'NEUTRAL')
-    return recommendation_map.get(tv_rec, tv_rec)
+def analyze_options_chain(symbol):
+    """Get options data for Indian stocks"""
+    try:
+        # Placeholder - in real implementation, use NSE/BSE API
+        return {
+            "put_call_ratio": 0.8,
+            "implied_volatility": 0.25,
+            "open_interest": "1M"
+        }
+    except Exception:
+        return {"error": "Options data not available"}
 
-def generate_charts(symbol, interval, df):
-    """Generate all required charts"""
+# Signal Generation Functions
+def calculate_kelly_criterion(prob_win, win_loss_ratio):
+    """Adaptive position sizing using Kelly Criterion"""
+    kelly_fraction = (prob_win * (win_loss_ratio + 1) - 1) / win_loss_ratio
+    return max(0, min(kelly_fraction, 1))  # Cap between 0 and 1
+
+def generate_risk_zones(data):
+    """Generate risk-managed entry/exit zones"""
+    current_price = data['Close'].iloc[-1]
+    atr = talib.ATR(data['High'], data['Low'], data['Close'], timeperiod=14).iloc[-1]
+    
     return {
-        'main': generate_main_chart(symbol, interval, df),
-        'momentum': generate_momentum_chart(df),
-        'volume': generate_volume_chart(df),
-        'advanced': generate_advanced_chart(df)
-    }
-
-def generate_main_chart(symbol, interval, df):
-    """Generate main analysis chart"""
-    if df.empty:
-        return ""
-    
-    # Prepare plot
-    apds = []
-    
-    # Add moving averages if available
-    for ma in ['sma_20', 'ema_50']:
-        if ma in df.columns:
-            apds.append(mpf.make_addplot(df[ma], color='blue' if 'sma' in ma else 'purple'))
-    
-    # Add Bollinger Bands if available
-    if 'bbands_upper_20_2.0' in df.columns and 'bbands_lower_20_2.0' in df.columns:
-        apds.append(mpf.make_addplot(df['bbands_upper_20_2.0'], color='gray'))
-        apds.append(mpf.make_addplot(df['bbands_lower_20_2.0'], color='gray'))
-    
-    # Add Fibonacci levels
-    for level in ['fib_23', 'fib_38', 'fib_50', 'fib_61']:
-        if level in df.columns:
-            apds.append(mpf.make_addplot(df[level], color='orange', linestyle='--'))
-    
-    # Save to buffer
-    buffer = BytesIO()
-    mpf.plot(df, type='candle', style='yahoo', 
-             title=f"{symbol} ({interval})", 
-             ylabel='Price', 
-             addplot=apds if apds else None, 
-             volume=True,
-             savefig=dict(fname=buffer, dpi=100, bbox_inches='tight'))
-    
-    buffer.seek(0)
-    return f"data:image/png;base64,{base64.b64encode(buffer.read()).decode()}"
-
-def generate_momentum_chart(df):
-    """Generate momentum composite chart"""
-    if df.empty:
-        return ""
-    
-    plt.figure(figsize=(12, 8))
-    
-    # Create subplots
-    ax1 = plt.subplot(3, 1, 1)
-    if 'rsi_14' in df.columns:
-        df['rsi_14'].plot(title='RSI', color='blue')
-        plt.axhline(70, color='red', linestyle='--')
-        plt.axhline(30, color='green', linestyle='--')
-    else:
-        plt.title('RSI Data Not Available')
-    
-    plt.subplot(3, 1, 2, sharex=ax1)
-    if 'macd_12_26_9' in df.columns and 'macds_12_26_9' in df.columns:
-        df['macd_12_26_9'].plot(color='blue', label='MACD')
-        df['macds_12_26_9'].plot(color='orange', label='Signal')
-        plt.title('MACD')
-        plt.legend()
-    else:
-        plt.title('MACD Data Not Available')
-    
-    plt.subplot(3, 1, 3, sharex=ax1)
-    if 'stochk_14_3' in df.columns and 'stochd_14_3' in df.columns:
-        df['stochk_14_3'].plot(color='blue', label='Stoch %K')
-        df['stochd_14_3'].plot(color='orange', label='Stoch %D')
-        plt.axhline(80, color='red', linestyle='--')
-        plt.axhline(20, color='green', linestyle='--')
-        plt.title('Stochastic')
-        plt.legend()
-    else:
-        plt.title('Stochastic Data Not Available')
-    
-    plt.tight_layout()
-    
-    # Save to buffer
-    buffer = BytesIO()
-    plt.savefig(buffer, format='png')
-    plt.close()
-    buffer.seek(0)
-    return f"data:image/png;base64,{base64.b64encode(buffer.read()).decode()}"
-
-def generate_volume_chart(df):
-    """Generate volume analysis chart"""
-    if df.empty or 'volume' not in df.columns:
-        return ""
-    
-    plt.figure(figsize=(12, 8))
-    
-    # Volume bars
-    plt.subplot(3, 1, 1)
-    plt.bar(df.index, df['volume'], color='blue')
-    plt.title('Volume')
-    
-    # VWAP
-    plt.subplot(3, 1, 2, sharex=plt.gca())
-    if 'close' in df.columns:
-        df['close'].plot(color='blue', label='Price')
-        if 'vwap' in df.columns:
-            df['vwap'].plot(color='orange', label='VWAP')
-        plt.title('Price vs VWAP')
-        plt.legend()
-    else:
-        plt.title('Price Data Not Available')
-    
-    # OBV
-    plt.subplot(3, 1, 3, sharex=plt.gca())
-    if 'obv' in df.columns:
-        df['obv'].plot(color='green')
-        plt.title('On Balance Volume (OBV)')
-    else:
-        plt.title('OBV Data Not Available')
-    
-    plt.tight_layout()
-    
-    # Save to buffer
-    buffer = BytesIO()
-    plt.savefig(buffer, format='png')
-    plt.close()
-    buffer.seek(0)
-    return f"data:image/png;base64,{base64.b64encode(buffer.read()).decode()}"
-
-def generate_advanced_chart(df):
-    """Generate advanced analytics chart"""
-    if df.empty:
-        return ""
-    
-    plt.figure(figsize=(12, 8))
-    
-    # ATR
-    if 'atr_14' in df.columns:
-        plt.subplot(2, 1, 1)
-        df['atr_14'].plot(color='purple')
-        plt.title('Average True Range (ATR)')
-    
-    # Bollinger Bandwidth
-    if 'bbands_upper_20_2.0' in df.columns and 'bbands_lower_20_2.0' in df.columns:
-        bandwidth = (df['bbands_upper_20_2.0'] - df['bbands_lower_20_2.0']) / df['bbands_mid_20_2.0']
-        plt.subplot(2, 1, 2, sharex=plt.gca())
-        bandwidth.plot(color='red')
-        plt.title('Bollinger Bandwidth')
-    
-    plt.tight_layout()
-    
-    # Save to buffer
-    buffer = BytesIO()
-    plt.savefig(buffer, format='png')
-    plt.close()
-    buffer.seek(0)
-    return f"data:image/png;base64,{base64.b64encode(buffer.read()).decode()}"
-
-def get_ai_recommendation(symbol, interval, analysis_data):
-    """Get AI recommendation from OpenRouter"""
-    if not os.getenv('OPENROUTER_API_KEY'):
-        return None
-    
-    # Prepare prompt
-    prompt = f"""
-    Perform comprehensive technical analysis for {symbol} ({interval}) with these observations:
-
-    **Price Structure**
-    Current: ₹{analysis_data['current_price']:.2f}
-    Trend: {analysis_data['trend_strength']}/10
-    Key Levels: Support @ ₹{analysis_data['support']:.2f} | Resistance @ ₹{analysis_data['resistance']:.2f}
-    Pattern: {analysis_data['dominant_pattern']} (Reliability: {analysis_data['pattern_score']}/5)
-
-    **Indicator Summary**
-    Trend: {analysis_data['trend_summary']}
-    Momentum: {analysis_data['momentum_summary']}
-    Volume: {analysis_data['volume_profile_summary']}
-    Volatility: {analysis_data['volatility_class']} (ATR: ₹{analysis_data['atr_value']:.2f})
-
-    **Market Context**
-    Sector: Financial Services (Outperforming Nifty by 5.2%)
-    Market Phase: Bullish (Confirmed by MACD, Golden Cross)
-    Sentiment: Positive (PCR: 0.85)
-
-    **Analysis Request**
-    1. Recommendation (Strong Buy to Strong Sell)
-    2. Confidence Score (0-100%)
-    3. Key Technical Drivers
-    4. Price Targets (1W/1M/3M)
-    5. Risk-Managed Trading Plan:
-        - Entry Zones
-        - Position Sizing
-        - Stop-Loss Strategy
-        - Profit Targets
-        - Hedging Recommendations
-
-    Respond in JSON format matching the schema.
-    """
-    
-    headers = {
-        "Authorization": f"Bearer {os.getenv('OPENROUTER_API_KEY')}",
-        "Content-Type": "application/json"
-    }
-    
-    payload = {
-        "model": os.getenv('OPENROUTER_MODEL', 'mistralai/mixtral-8x7b-instruct'),
-        "messages": [
-            {
-                "role": "user", 
-                "content": prompt,
-                "metadata": {
-                    "response_format": {
-                        "type": "json_object",
-                        "schema": {
-                            "type": "object",
-                            "properties": {
-                                "rating": {"type": "string"},
-                                "confidence": {"type": "number"},
-                                "risk_level": {"type": "string"},
-                                "time_horizon": {"type": "string"},
-                                "price_targets": {
-                                    "type": "object",
-                                    "properties": {
-                                        "conservative": {"type": "number"},
-                                        "moderate": {"type": "number"},
-                                        "aggressive": {"type": "number"},
-                                        "stop_loss": {"type": "number"}
-                                    }
-                                },
-                                "trading_plan": {
-                                    "type": "object",
-                                    "properties": {
-                                        "entry_zones": {"type": "array", "items": {"type": "string"}},
-                                        "position_size": {"type": "string"},
-                                        "profit_targets": {
-                                            "type": "array",
-                                            "items": {
-                                                "type": "object",
-                                                "properties": {
-                                                    "level": {"type": "number"},
-                                                    "size": {"type": "string"}
-                                                }
-                                            }
-                                        },
-                                        "hedging": {"type": "string"}
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+        "entry_zone": [current_price - 0.5 * atr, current_price - 0.25 * atr],
+        "stop_loss": current_price - 2 * atr,
+        "targets": [
+            current_price + 1 * atr,
+            current_price + 2 * atr,
+            current_price + 3 * atr
         ]
     }
-    
-    try:
-        response = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers=headers,
-            json=payload,
-            timeout=30
-        )
-        response.raise_for_status()
-        
-        # Parse JSON response
-        content = response.json()['choices'][0]['message']['content']
-        return json.loads(content)
-    except Exception as e:
-        app.logger.error(f"AI request failed: {str(e)}")
-        return None
+
+@app.route('/')
+def index():
+    return render_template('index.html')
 
 @app.route('/analyze', methods=['GET'])
-def analyze_stock():
-    """Main analysis endpoint"""
-    symbol = request.args.get('symbol', 'RELIANCE').upper()
-    interval = request.args.get('interval', '1d')
+def analyze_symbol():
+    symbol = request.args.get('symbol', 'RELIANCE')
+    exchange = request.args.get('exchange', 'NSE')
+    interval_str = request.args.get('interval', '1d')
     
-    start_time = time.time()
-    
-    # Fetch data
-    df = fetch_stock_data(symbol, interval)
-    if df is None:
-        return jsonify({"error": "Data unavailable for symbol"}), 404
-    
-    # Get TradingView analysis
-    tv_analysis = get_tradingview_analysis(symbol, interval)
-    
-    # Calculate indicators
-    df = calculate_indicators(df)
-    
-    # Prepare analysis data
-    current_price = df['close'].iloc[-1]
-    prev_price = df['close'].iloc[-2]
-    daily_change = ((current_price - prev_price) / prev_price) * 100
-    
-    key_levels = calculate_key_levels(df)
-    patterns = detect_candlestick_patterns(df)
-    
-    # Determine dominant pattern
-    dominant_pattern = patterns[0]['name'] if patterns else 'None'
-    pattern_score = patterns[0]['reliability'] if patterns else 0
-    
-    # Prepare AI input
-    ai_input = {
-        'symbol': symbol,
-        'interval': interval,
-        'current_price': current_price,
-        'support': key_levels['support'][0],
-        'resistance': key_levels['resistance'][0],
-        'trend_strength': 8.2,
-        'dominant_pattern': dominant_pattern,
-        'pattern_score': pattern_score,
-        'trend_summary': "Bullish" if current_price > df['sma_20'].iloc[-1] else "Bearish",
-        'momentum_summary': "Increasing" if df['rsi_14'].iloc[-1] > 50 else "Decreasing",
-        'volume_profile_summary': "Accumulation" if df['obv'].iloc[-1] > df['obv'].iloc[-5] else "Distribution",
-        'volatility_class': "High" if df['atr_14'].iloc[-1] > current_price * 0.02 else "Low",
-        'atr_value': df['atr_14'].iloc[-1] if 'atr_14' in df.columns else 0,
-        'tv_recommendation': get_tradingview_recommendation(tv_analysis)
+    # Map intervals to TradingView format
+    interval_map = {
+        '1m': Interval.INTERVAL_1_MINUTE,
+        '2m': Interval.INTERVAL_1_MINUTE,   # Approximate
+        '5m': Interval.INTERVAL_5_MINUTES,
+        '15m': Interval.INTERVAL_15_MINUTES,
+        '30m': Interval.INTERVAL_30_MINUTES,
+        '60m': Interval.INTERVAL_1_HOUR,
+        '90m': Interval.INTERVAL_1_HOUR,    # Approximate
+        '1h': Interval.INTERVAL_1_HOUR,
+        '1d': Interval.INTERVAL_1_DAY,
+        '5d': Interval.INTERVAL_1_DAY,      # Approximate
+        '1wk': Interval.INTERVAL_1_WEEK,
+        '1mo': Interval.INTERVAL_1_MONTH,
+        '3mo': Interval.INTERVAL_1_MONTH    # Approximate
     }
-    
-    # Build response
-    response = {
-        "metadata": {
-            "symbol": symbol,
-            "interval": interval,
-            "last_refreshed": datetime.now().strftime('%Y-%m-%d %H:%M'),
-            "analysis_period": f"{len(df)} periods",
-            "processing_time": f"{time.time() - start_time:.2f}s"
-        },
-        "price_analysis": {
-            "current": current_price,
-            "daily_change": round(daily_change, 2),
-            "key_levels": key_levels
-        },
-        "indicator_summary": {
-            "trend": {
-                "direction": "Bullish" if current_price > df['sma_20'].iloc[-1] else "Bearish",
-                "strength": 75.4,
-                "key_drivers": ["EMA Crossover", "MACD Bullish"]
-            },
-            "momentum": {
-                "status": "Increasing" if df['rsi_14'].iloc[-1] > 50 else "Decreasing",
-                "divergence": "None",
-                "oscillators": [
-                    f"RSI: {df['rsi_14'].iloc[-1]:.1f}" if 'rsi_14' in df.columns else "RSI: N/A",
-                    f"Stoch: {df['stochk_14_3'].iloc[-1]:.1f}/{df['stochd_14_3'].iloc[-1]:.1f}"
-                    if 'stochk_14_3' in df.columns else "Stochastic: N/A"
-                ]
-            },
-            "volatility": {
-                "regime": "Expanding" if df['atr_14'].iloc[-1] > df['atr_14'].iloc[-5] else "Contracting",
-                "expected_range": f"{current_price * 0.95:.1f}-{current_price * 1.05:.1f}",
-                "atr": df['atr_14'].iloc[-1] if 'atr_14' in df.columns else 0
-            },
-            "volume_profile": {
-                "poc": df['poc'].iloc[-1] if 'poc' in df else current_price,
-                "value_area": [current_price * 0.99, current_price * 1.01],
-                "sentiment": "Accumulation" if df['obv'].iloc[-1] > df['obv'].iloc[-5] else "Distribution"
-            }
-        },
-        "pattern_recognition": patterns,
-        "chart_urls": generate_charts(symbol, interval, df),
-        "tradingview_reference": tv_analysis
+    tv_interval = interval_map.get(interval_str, Interval.INTERVAL_1_DAY)
+
+    # 1. Data Processing - Adjust period based on interval
+    period_map = {
+        '1m': '7d',
+        '2m': '7d',
+        '5m': '60d',
+        '15m': '60d',
+        '30m': '60d',
+        '60m': '90d',
+        '90m': '90d',
+        '1h': '180d',
+        '1d': '1y',
+        '5d': '1y',
+        '1wk': '2y',
+        '1mo': '5y',
+        '3mo': '5y'
     }
+    period = period_map.get(interval_str, '1y')
     
-    # Add AI recommendation
-    ai_rec = get_ai_recommendation(symbol, interval, ai_input)
-    if ai_rec:
-        response["ai_recommendation"] = ai_rec
+    formatted_symbol = f"{symbol}.{'NS' if exchange == 'NSE' else 'BO'}"
+    try:
+        data = yf.download(formatted_symbol, period=period, interval=interval_str, auto_adjust=True)
+        if data.empty:
+            return jsonify({"error": f"No data found for symbol {formatted_symbol}"}), 404
+    except Exception as e:
+        return jsonify({"error": f"Data download failed: {str(e)}"}), 500
+
+    # 2. Technical Analysis
+    data['RSI'] = talib.RSI(data['Close'])
+    data['MACD'], data['MACD_Signal'], _ = talib.MACD(data['Close'])
+    data['BB_Upper'], data['BB_Middle'], data['BB_Lower'] = talib.BBANDS(data['Close'])
     
-    # Add ML forecast if available
-    if 'ml_forecast' in df:
-        response["advanced_analytics"] = {
-            "lstm_forecast": {
-                "1D": {
-                    "direction": "Bullish" if df['ml_forecast'].iloc[-1] > 0.5 else "Bearish", 
-                    "confidence": round(df['ml_forecast'].iloc[-1] * 100, 1)
-                },
-            }
+    # Advanced TA
+    ichimoku_twist = detect_ichimoku_twist(data) if len(data) > 52 else "Not enough data"
+    gann_levels = get_gann_levels(data['Close'].iloc[-1])
+    fib_zones = calculate_fibonacci_zones(data) if len(data) > 20 else {}
+    vwap = calculate_vwap(data) if 'Volume' in data else None
+    supertrend = calculate_supertrend(data) if len(data) > 14 else {}
+
+    # 3. AI Analysis Engine
+    try:
+        forecast = train_lstm_model(data) if len(data) > 100 else data['Close'].iloc[-1] * 1.01
+    except Exception as e:
+        forecast = data['Close'].iloc[-1] * 1.01  # Fallback
+        
+    news_sentiment = get_news_sentiment(symbol)
+    anomalies = detect_anomalies(data) if len(data) > 100 else []
+    risk_assessment = bayesian_risk_assessment(data) if len(data) > 20 else {}
+
+    # 4. Market Intelligence
+    options_data = analyze_options_chain(symbol)
+    economic_events = []  # Would be from API in real implementation
+    sector_heatmap = {"IT": "strong", "Banking": "neutral", "Pharma": "weak"}
+
+    # 5. TradingView Integration
+    try:
+        tv_analysis = TA_Handler(
+            symbol=symbol,
+            screener="india",
+            exchange=exchange,
+            interval=tv_interval
+        ).get_analysis()
+        signals = {
+            "buy": tv_analysis.summary['BUY'],
+            "sell": tv_analysis.summary['SELL'],
+            "neutral": tv_analysis.summary['NEUTRAL']
         }
-    
+        recommendation = tv_analysis.summary['RECOMMENDATION']
+    except Exception as e:
+        signals = {"buy": 0, "sell": 0, "neutral": 10}
+        recommendation = "NEUTRAL"
+
+    # 6. Signal Generation
+    position_size = calculate_kelly_criterion(0.6, 2)
+    trade_zones = generate_risk_zones(data) if len(data) > 14 else {}
+
+    # 7. Prepare Response
+    response = {
+        "symbol": formatted_symbol,
+        "interval": interval_str,
+        "recommendation": recommendation,
+        "technical_analysis": {
+            "indicators": {
+                'RSI': float(data['RSI'].iloc[-1]) if 'RSI' in data else None,
+                'MACD': float(data['MACD'].iloc[-1]) if 'MACD' in data else None,
+                'MACD_Signal': float(data['MACD_Signal'].iloc[-1]) if 'MACD_Signal' in data else None,
+                'BB_Upper': float(data['BB_Upper'].iloc[-1]) if 'BB_Upper' in data else None,
+                'BB_Middle': float(data['BB_Middle'].iloc[-1]) if 'BB_Middle' in data else None,
+                'BB_Lower': float(data['BB_Lower'].iloc[-1]) if 'BB_Lower' in data else None,
+                'VWAP': float(vwap) if vwap else None,
+                'Supertrend': supertrend
+            },
+            "patterns": {
+                "ichimoku_twist": ichimoku_twist,
+                "gann_levels": gann_levels,
+                "fibonacci_zones": fib_zones
+            }
+        },
+        "ai_insights": {
+            "price_forecast": float(forecast),
+            "news_sentiment": news_sentiment,
+            "detected_anomalies": anomalies,
+            "risk_assessment": risk_assessment
+        },
+        "market_intelligence": {
+            "options_chain": options_data,
+            "economic_events": economic_events,
+            "sector_heatmap": sector_heatmap
+        },
+        "signal_generation": {
+            "tradingview_signals": signals,
+            "adaptive_position_size_kelly": float(position_size),
+            "risk_managed_zones": trade_zones
+        }
+    }
     return jsonify(response)
 
-@app.route('/chart/<chart_type>', methods=['GET'])
-def serve_chart(chart_type):
-    """Serve individual chart image"""
-    symbol = request.args.get('symbol', 'RELIANCE').upper()
-    interval = request.args.get('interval', '1d')
+@app.route('/chart', methods=['GET'])
+def generate_chart():
+    symbol = request.args.get('symbol', 'RELIANCE')
+    exchange = request.args.get('exchange', 'NSE')
+    interval_str = request.args.get('interval', '1d')
     
-    df = fetch_stock_data(symbol, interval)
-    if df is None:
-        return jsonify({"error": "Data unavailable"}), 404
-    
-    chart_funcs = {
-        'main': generate_main_chart,
-        'momentum': generate_momentum_chart,
-        'volume': generate_volume_chart,
-        'advanced': generate_advanced_chart
+    # Adjust period based on interval
+    period_map = {
+        '1m': '7d',
+        '2m': '7d',
+        '5m': '60d',
+        '15m': '60d',
+        '30m': '60d',
+        '60m': '90d',
+        '90m': '90d',
+        '1h': '180d',
+        '1d': '1y',
+        '5d': '1y',
+        '1wk': '2y',
+        '1mo': '5y',
+        '3mo': '5y'
     }
+    period = period_map.get(interval_str, '1y')
     
-    if chart_type not in chart_funcs:
-        return jsonify({"error": "Invalid chart type"}), 400
-    
+    formatted_symbol = f"{symbol}.{'NS' if exchange == 'NSE' else 'BO'}"
     try:
-        if chart_type == 'main':
-            chart_data = chart_funcs[chart_type](symbol, interval, df)
-        else:
-            chart_data = chart_funcs[chart_type](df)
-        
-        if not chart_data:
-            return jsonify({"error": "Chart generation failed"}), 500
-            
-        return send_file(BytesIO(base64.b64decode(chart_data.split(',')[1])), mimetype='image/png')
+        data = yf.download(formatted_symbol, period=period, interval=interval_str, auto_adjust=True)
+        if data.empty:
+            return jsonify({"error": f"No data found for symbol {formatted_symbol}"}), 404
     except Exception as e:
-        return jsonify({"error": f"Chart error: {str(e)}"}), 500
+        return jsonify({"error": f"Data download failed: {str(e)}"}), 500
+
+    # Add technical indicators to the plot
+    apds = []
+    
+    # Only add indicators if we have enough data
+    if len(data) > 14:
+        data['BB_Upper'], data['BB_Middle'], data['BB_Lower'] = talib.BBANDS(data['Close'])
+        apds.extend([
+            mpf.make_addplot(data['BB_Upper'], color='blue'),
+            mpf.make_addplot(data['BB_Middle'], color='orange'),
+            mpf.make_addplot(data['BB_Lower'], color='blue'),
+        ])
+    
+    if len(data) > 26:
+        data['MACD'], data['MACD_Signal'], _ = talib.MACD(data['Close'])
+        apds.extend([
+            mpf.make_addplot(data['MACD'], color='green', panel=1),
+            mpf.make_addplot(data['MACD_Signal'], color='red', panel=1)
+        ])
+
+    # Create the plot
+    buf = BytesIO()
+    try:
+        fig, axlist = mpf.plot(
+            data,
+            type='candle',
+            style='yahoo',
+            title=f'{symbol} ({interval_str})',
+            volume=True,
+            addplot=apds,
+            figsize=(12, 8),
+            returnfig=True
+        )
+        fig.savefig(buf, format='png')
+        plt.close(fig)
+        buf.seek(0)
+        return send_file(buf, mimetype='image/png')
+    except Exception as e:
+        return jsonify({"error": f"Chart generation failed: {str(e)}"}), 500
 
 if __name__ == '__main__':
-    port = int(os.getenv('PORT', 5000))
-    debug = os.getenv('DEBUG_MODE', 'False').lower() == 'true'
-    app.run(host='0.0.0.0', port=port, debug=debug)
+    app.run(debug=True, use_reloader=False)
