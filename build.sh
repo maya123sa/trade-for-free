@@ -1,9 +1,18 @@
 #!/usr/bin/env bash
 
-# Install TA-Lib dependencies
+set -e  # Exit on first error
+
+# Download TA-Lib source code
 wget http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz
+
+# Extract it
 tar -xvzf ta-lib-0.4.0-src.tar.gz
-cd ta-lib/
+
+# Build and install
+cd ta-lib
 ./configure --prefix=/usr
 make
-sudo make install
+make install
+
+# Go back to root for pip install
+cd ..
