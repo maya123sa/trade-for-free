@@ -11,7 +11,11 @@ import matplotlib
 matplotlib.use('Agg')  # Fix matplotlib backend issue
 from matplotlib import pyplot as plt
 from io import BytesIO
-import base64
+import os
+import warnings
+
+# Suppress warnings
+warnings.filterwarnings('ignore')
 
 # AI imports
 try:
@@ -96,6 +100,8 @@ def calculate_ichimoku(data):
 
 def detect_ichimoku_twist(data):
     """Detect Ichimoku Cloud twists"""
+    if len(data) < 52:
+        return "Not enough data"
     ichimoku = calculate_ichimoku(data)
     return ichimoku['cloud_status'] + " Cloud"
 
@@ -107,6 +113,8 @@ def get_gann_levels(price):
 
 def calculate_fibonacci_zones(data):
     """Calculate Fibonacci retracement zones"""
+    if len(data) < 20:
+        return {}
     high = data['High'].max()
     low = data['Low'].min()
     diff = high - low
@@ -130,6 +138,8 @@ def calculate_vwap(data):
 
 def calculate_supertrend(data, period=10, multiplier=3):
     """Calculate Supertrend indicator"""
+    if len(data) < period:
+        return {}
     hl2 = (data['High'] + data['Low']) / 2
     atr = talib.ATR(data['High'], data['Low'], data['Close'], timeperiod=period)
     
@@ -159,8 +169,8 @@ def calculate_supertrend(data, period=10, multiplier=3):
 # AI Engine Functions
 def train_lstm_model(data):
     """Train LSTM model on historical data"""
-    if not TF_IMPORT_SUCCESS or lstm_model is None:
-        # Fallback if TensorFlow not available
+    if not TF_IMPORT_SUCCESS or lstm_model is None or len(data) < 100:
+        # Fallback if TensorFlow not available or insufficient data
         return data['Close'].iloc[-1] * 1.01
     
     scaler = MinMaxScaler(feature_range=(0, 1))
@@ -188,6 +198,8 @@ def train_lstm_model(data):
 
 def bayesian_risk_assessment(data):
     """Bayesian probability models for risk assessment"""
+    if len(data) < 20:
+        return {}
     returns = data['Close'].pct_change().dropna()
     mean_return = returns.mean()
     std_return = returns.std()
@@ -206,6 +218,8 @@ def bayesian_risk_assessment(data):
 
 def detect_anomalies(data):
     """Detect price anomalies using Isolation Forest"""
+    if len(data) < 100:
+        return []
     features = data[['Close', 'Volume']].copy()
     features['Returns'] = data['Close'].pct_change()
     features.dropna(inplace=True)
@@ -221,8 +235,8 @@ def get_news_sentiment(symbol):
     """Get news sentiment for a symbol using web scraping"""
     try:
         url = f"https://www.google.com/search?q={symbol}+stock+news"
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        response = requests.get(url, headers=headers)
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+        response = requests.get(url, headers=headers, timeout=10)
         soup = BeautifulSoup(response.text, 'html.parser')
         
         # Extract headlines
@@ -260,6 +274,8 @@ def calculate_kelly_criterion(prob_win, win_loss_ratio):
 
 def generate_risk_zones(data):
     """Generate risk-managed entry/exit zones"""
+    if len(data) < 14:
+        return {}
     current_price = data['Close'].iloc[-1]
     atr = talib.ATR(data['High'], data['Low'], data['Close'], timeperiod=14).iloc[-1]
     
@@ -301,7 +317,7 @@ def analyze_symbol():
     }
     tv_interval = interval_map.get(interval_str, Interval.INTERVAL_1_DAY)
 
-    # 1. Data Processing - Adjust period based on interval
+    # Adjust period based on interval
     period_map = {
         '1m': '7d',
         '2m': '7d',
@@ -322,32 +338,41 @@ def analyze_symbol():
     formatted_symbol = f"{symbol}.{'NS' if exchange == 'NSE' else 'BO'}"
     try:
         data = yf.download(formatted_symbol, period=period, interval=interval_str, auto_adjust=True)
-        if data.empty:
+        if data.empty or data is None:
             return jsonify({"error": f"No data found for symbol {formatted_symbol}"}), 404
     except Exception as e:
         return jsonify({"error": f"Data download failed: {str(e)}"}), 500
 
     # 2. Technical Analysis
-    data['RSI'] = talib.RSI(data['Close'])
-    data['MACD'], data['MACD_Signal'], _ = talib.MACD(data['Close'])
-    data['BB_Upper'], data['BB_Middle'], data['BB_Lower'] = talib.BBANDS(data['Close'])
+    # Calculate indicators only if we have enough data
+    if len(data) > 14:
+        data['RSI'] = talib.RSI(data['Close'])
+        data['MACD'], data['MACD_Signal'], _ = talib.MACD(data['Close'])
+        data['BB_Upper'], data['BB_Middle'], data['BB_Lower'] = talib.BBANDS(data['Close'])
+    else:
+        data['RSI'] = np.nan
+        data['MACD'] = np.nan
+        data['MACD_Signal'] = np.nan
+        data['BB_Upper'] = np.nan
+        data['BB_Middle'] = np.nan
+        data['BB_Lower'] = np.nan
     
     # Advanced TA
-    ichimoku_twist = detect_ichimoku_twist(data) if len(data) > 52 else "Not enough data"
+    ichimoku_twist = detect_ichimoku_twist(data)
     gann_levels = get_gann_levels(data['Close'].iloc[-1])
-    fib_zones = calculate_fibonacci_zones(data) if len(data) > 20 else {}
-    vwap = calculate_vwap(data) if 'Volume' in data else None
-    supertrend = calculate_supertrend(data) if len(data) > 14 else {}
+    fib_zones = calculate_fibonacci_zones(data)
+    vwap = calculate_vwap(data)
+    supertrend = calculate_supertrend(data)
 
     # 3. AI Analysis Engine
     try:
-        forecast = train_lstm_model(data) if len(data) > 100 else data['Close'].iloc[-1] * 1.01
+        forecast = train_lstm_model(data)
     except Exception as e:
         forecast = data['Close'].iloc[-1] * 1.01  # Fallback
         
     news_sentiment = get_news_sentiment(symbol)
-    anomalies = detect_anomalies(data) if len(data) > 100 else []
-    risk_assessment = bayesian_risk_assessment(data) if len(data) > 20 else {}
+    anomalies = detect_anomalies(data)
+    risk_assessment = bayesian_risk_assessment(data)
 
     # 4. Market Intelligence
     options_data = analyze_options_chain(symbol)
@@ -374,7 +399,7 @@ def analyze_symbol():
 
     # 6. Signal Generation
     position_size = calculate_kelly_criterion(0.6, 2)
-    trade_zones = generate_risk_zones(data) if len(data) > 14 else {}
+    trade_zones = generate_risk_zones(data)
 
     # 7. Prepare Response
     response = {
@@ -383,12 +408,12 @@ def analyze_symbol():
         "recommendation": recommendation,
         "technical_analysis": {
             "indicators": {
-                'RSI': float(data['RSI'].iloc[-1]) if 'RSI' in data else None,
-                'MACD': float(data['MACD'].iloc[-1]) if 'MACD' in data else None,
-                'MACD_Signal': float(data['MACD_Signal'].iloc[-1]) if 'MACD_Signal' in data else None,
-                'BB_Upper': float(data['BB_Upper'].iloc[-1]) if 'BB_Upper' in data else None,
-                'BB_Middle': float(data['BB_Middle'].iloc[-1]) if 'BB_Middle' in data else None,
-                'BB_Lower': float(data['BB_Lower'].iloc[-1]) if 'BB_Lower' in data else None,
+                'RSI': float(data['RSI'].iloc[-1]) if not np.isnan(data['RSI'].iloc[-1]) else None,
+                'MACD': float(data['MACD'].iloc[-1]) if not np.isnan(data['MACD'].iloc[-1]) else None,
+                'MACD_Signal': float(data['MACD_Signal'].iloc[-1]) if not np.isnan(data['MACD_Signal'].iloc[-1]) else None,
+                'BB_Upper': float(data['BB_Upper'].iloc[-1]) if not np.isnan(data['BB_Upper'].iloc[-1]) else None,
+                'BB_Middle': float(data['BB_Middle'].iloc[-1]) if not np.isnan(data['BB_Middle'].iloc[-1]) else None,
+                'BB_Lower': float(data['BB_Lower'].iloc[-1]) if not np.isnan(data['BB_Lower'].iloc[-1]) else None,
                 'VWAP': float(vwap) if vwap else None,
                 'Supertrend': supertrend
             },
@@ -444,7 +469,7 @@ def generate_chart():
     formatted_symbol = f"{symbol}.{'NS' if exchange == 'NSE' else 'BO'}"
     try:
         data = yf.download(formatted_symbol, period=period, interval=interval_str, auto_adjust=True)
-        if data.empty:
+        if data.empty or data is None:
             return jsonify({"error": f"No data found for symbol {formatted_symbol}"}), 404
     except Exception as e:
         return jsonify({"error": f"Data download failed: {str(e)}"}), 500
@@ -481,7 +506,7 @@ def generate_chart():
             figsize=(12, 8),
             returnfig=True
         )
-        fig.savefig(buf, format='png')
+        fig.savefig(buf, format='png', bbox_inches='tight')
         plt.close(fig)
         buf.seek(0)
         return send_file(buf, mimetype='image/png')
@@ -489,4 +514,5 @@ def generate_chart():
         return jsonify({"error": f"Chart generation failed: {str(e)}"}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True, use_reloader=False)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
