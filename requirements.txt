@@ -15,3 +15,4 @@ requests
 tradingview_ta
 python-dotenv
 flask-cors
+TA-Lib
