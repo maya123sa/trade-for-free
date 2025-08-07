@@ -1,7 +1,6 @@
 Flask
 Flask-Cors
 yfinance
-pandas-ta
 numpy
 pandas
 mplfinance
