@@ -1,0 +1,32 @@
+{
+  "name": "indian-stock-analysis",
+  "version": "1.0.0",
+  "description": "Indian Stock Technical Analysis Application - Python Backend",
+  "main": "main.py",
+  "scripts": {
+    "build": "echo 'This is a Python application. Use pip install -r requirements.txt to install dependencies.'",
+    "start": "python main.py",
+    "dev": "python main.py",
+    "install": "pip install -r requirements.txt"
+  },
+  "keywords": [
+    "indian-stocks",
+    "technical-analysis",
+    "nse",
+    "bse",
+    "python",
+    "flask"
+  ],
+  "author": "Indian Stock Analysis Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/indian-stock-analysis.git"
+  },
+  "engines": {
+    "node": ">=14.0.0",
+    "python": ">=3.8.0"
+  },
+  "devDependencies": {},
+  "dependencies": {}
+}
