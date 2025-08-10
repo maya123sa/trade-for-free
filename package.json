@@ -4,7 +4,7 @@
   "description": "Indian Stock Technical Analysis Application - Node.js Backend",
   "main": "server.js",
   "scripts": {
-    "build": "npm install",
+    "build": "echo 'Build completed'",
     "start": "node server.js",
     "dev": "node server.js"
   },
