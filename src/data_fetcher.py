@@ -9,7 +9,11 @@ from datetime import datetime, timedelta
 import pytz
 from tradingview_ta import TA_Handler, Interval, Exchange
 import yfinance as yf
+import warnings
 import logging
+
+# Suppress yfinance warnings
+warnings.filterwarnings("ignore", message=".*yfinance.*")
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +58,9 @@ class IndianStockDataFetcher:
             
             # Fetch data
             stock = yf.Ticker(yf_symbol)
-            data = stock.history(period=period, interval=interval)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                data = stock.history(period=period, interval=interval)
             
             if data.empty:
                 raise ValueError(f"No data found for symbol: {symbol}")

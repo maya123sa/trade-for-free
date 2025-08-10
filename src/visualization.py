@@ -11,14 +11,26 @@ import numpy as np
 from datetime import datetime, time
 import pytz
 from typing import Dict, Any, List
+import warnings
 import logging
+
+# Suppress matplotlib warnings
+warnings.filterwarnings("ignore", category=UserWarning, module="matplotlib")
 
 logger = logging.getLogger(__name__)
 
 class IndianStockVisualizer:
     def __init__(self):
         self.ist = pytz.timezone('Asia/Kolkata')
-        plt.style.use('seaborn-v0_8')
+        
+        # Set matplotlib style safely
+        try:
+            plt.style.use('seaborn-v0_8')
+        except OSError:
+            try:
+                plt.style.use('seaborn')
+            except OSError:
+                plt.style.use('default')
         
         # Indian market hours
         self.pre_open = time(9, 0)   # 9:00 AM IST

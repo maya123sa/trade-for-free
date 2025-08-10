@@ -1,14 +1,14 @@
 import os
-os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'  # Disable oneDNN custom operations warning
-os.environ['PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION'] = 'python'  # Fix protobuf warnings
 
-import warnings
-warnings.filterwarnings("ignore", category=UserWarning)  # Suppress all UserWarnings
-warnings.filterwarnings("ignore", category=FutureWarning)  # Suppress FutureWarnings
+# Suppress warnings
+warnings.filterwarnings("ignore", category=UserWarning)
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 import base64
 import json
 import time
+import warnings
 from io import BytesIO
 from flask import Flask, jsonify, request
 from flask_cors import CORS
@@ -24,11 +24,10 @@ import matplotlib.pyplot as plt
 from xgboost import XGBRegressor
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
-import requests 
+import requests
 from bs4 import BeautifulSoup
 from scipy.stats import zscore
 from scipy.signal import argrelextrema
-import joblib
 
 app = Flask(__name__)
 CORS(app)
@@ -392,7 +391,10 @@ def analyze():
         period = period_map.get(interval, '1y')
         
         # Fetch historical data
-        data = yf.download(symbol, period=period, interval=interval)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            data = yf.download(symbol, period=period, interval=interval, progress=False)
+            
         if data.empty:
             return jsonify({"error": "No data found for symbol"}), 404
         
@@ -539,7 +541,10 @@ def backtest_strategy():
         symbol += '.NS'
     
     try:
-        data = yf.download(symbol, period='5y', interval='1d')
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            data = yf.download(symbol, period='5y', interval='1d', progress=False)
+            
         if data.empty:
             return jsonify({"error": "No data found for symbol"}), 404
         

@@ -24,12 +24,6 @@ class Config:
     TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID', '')
     WHATSAPP_ENABLED = os.environ.get('WHATSAPP_ENABLED', 'False').lower() == 'true'
     
-    # Brokerage API settings
-    ZERODHA_API_KEY = os.environ.get('ZERODHA_API_KEY', '')
-    ZERODHA_ACCESS_TOKEN = os.environ.get('ZERODHA_ACCESS_TOKEN', '')
-    UPSTOX_API_KEY = os.environ.get('UPSTOX_API_KEY', '')
-    UPSTOX_ACCESS_TOKEN = os.environ.get('UPSTOX_ACCESS_TOKEN', '')
-    
     # Data refresh intervals (seconds)
     MARKET_STATUS_REFRESH = 30
     STOCK_DATA_REFRESH = 60

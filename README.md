@@ -50,20 +50,8 @@ pip install -r requirements.txt
 
 ### Required Packages
 ```bash
-pip install Flask Flask-CORS yfinance pandas numpy matplotlib seaborn
-pip install tradingview-ta TA-Lib requests beautifulsoup4 pytz scikit-learn
-```
-
-### TA-Lib Installation
-```bash
-# Ubuntu/Debian
-sudo apt-get install libta-lib-dev
-
-# macOS
-brew install ta-lib
-
-# Windows
-# Download from: https://www.lfd.uci.edu/~gohlke/pythonlibs/#ta-lib
+pip install Flask Flask-CORS yfinance pandas numpy matplotlib seaborn pandas-ta
+pip install tradingview-ta requests beautifulsoup4 pytz scikit-learn xgboost
 ```
 
 ## 🚀 Quick Start
@@ -82,8 +70,6 @@ http://localhost:5000
 ```bash
 export TELEGRAM_BOT_TOKEN="your_bot_token"
 export TELEGRAM_CHAT_ID="your_chat_id"
-export ZERODHA_API_KEY="your_api_key"
-export UPSTOX_API_KEY="your_api_key"
 ```
 
 ## 📊 API Endpoints
@@ -156,21 +142,6 @@ Banking, IT, Auto, Pharma, FMCG, Energy, Metals
 1. Configure Twilio account
 2. Set webhook URL
 3. Enable WhatsApp sandbox
-
-## 🔌 Broker Integration
-
-### Zerodha KiteConnect
-```python
-from src.utils import BrokerageIntegration
-
-broker = BrokerageIntegration()
-broker.configure_zerodha(api_key, access_token)
-```
-
-### Upstox API
-```python
-broker.configure_upstox(api_key, access_token)
-```
 
 ## 📈 Trading Strategies
 

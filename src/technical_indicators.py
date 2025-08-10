@@ -5,7 +5,13 @@ SuperTrend, Heikin-Ashi, Pivot Points, Volume Profile
 
 import pandas as pd
 import numpy as np
-import talib
+try:
+    import talib
+    TALIB_AVAILABLE = True
+except ImportError:
+    TALIB_AVAILABLE = False
+    logger.warning("TA-Lib not available. Using pandas_ta as fallback.")
+    import pandas_ta as ta
 from typing import Dict, Any
 import logging
 
@@ -18,12 +24,19 @@ class IndianTechnicalIndicators:
     def calculate_supertrend(self, data: pd.DataFrame, period: int = 7, multiplier: float = 3.0) -> pd.DataFrame:
         """Calculate SuperTrend indicator (popular in Indian markets)"""
         try:
-            high = data['High']
-            low = data['Low']
-            close = data['Close']
-            
-            # Calculate ATR
-            atr = talib.ATR(high, low, close, timeperiod=period)
+            if TALIB_AVAILABLE:
+                high = data['High']
+                low = data['Low']
+                close = data['Close']
+                
+                # Calculate ATR using TA-Lib
+                atr = talib.ATR(high, low, close, timeperiod=period)
+            else:
+                # Fallback to pandas_ta
+                atr = ta.atr(data['High'], data['Low'], data['Close'], length=period)
+                high = data['High']
+                low = data['Low']
+                close = data['Close']
             
             # Calculate basic bands
             hl2 = (high + low) / 2
@@ -212,12 +225,18 @@ class IndianTechnicalIndicators:
         try:
             result = data.copy()
             
-            # EMA 20
-            result['EMA_20'] = talib.EMA(data['Close'], timeperiod=20)
-            
-            # SMA 50 and 200
-            result['SMA_50'] = talib.SMA(data['Close'], timeperiod=50)
-            result['SMA_200'] = talib.SMA(data['Close'], timeperiod=200)
+            if TALIB_AVAILABLE:
+                # EMA 20
+                result['EMA_20'] = talib.EMA(data['Close'], timeperiod=20)
+                
+                # SMA 50 and 200
+                result['SMA_50'] = talib.SMA(data['Close'], timeperiod=50)
+                result['SMA_200'] = talib.SMA(data['Close'], timeperiod=200)
+            else:
+                # Fallback to pandas_ta
+                result['EMA_20'] = ta.ema(data['Close'], length=20)
+                result['SMA_50'] = ta.sma(data['Close'], length=50)
+                result['SMA_200'] = ta.sma(data['Close'], length=200)
             
             return result
             

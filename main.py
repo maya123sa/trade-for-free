@@ -23,7 +23,7 @@ from src.technical_indicators import IndianTechnicalIndicators
 from src.trading_strategies import IndianTradingStrategies
 from src.visualization import IndianStockVisualizer
 from src.alerts import AlertManager
-from src.utils import NSEHolidayCalendar, MarketHours
+from src.utils import NSEHolidayCalendar, MarketHours, format_indian_currency
 
 app = Flask(__name__)
 CORS(app)
