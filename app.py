@@ -1,6 +1,7 @@
 import os
 
-# Suppress warnings
+# Suppress warnings at the very beginning
+import warnings
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -8,7 +9,6 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 import base64
 import json
 import time
-import warnings
 from io import BytesIO
 from flask import Flask, jsonify, request
 from flask_cors import CORS
@@ -122,7 +122,8 @@ def get_stock_data_with_fallback(symbol, period='1y', interval='1d'):
             
         if not data.empty:
             return data, normalized_symbol
-    except:
+    except Exception as e:
+        print(f"Primary fetch failed for {normalized_symbol}: {e}")
         pass
     
     # Try BSE if NSE failed
@@ -135,7 +136,8 @@ def get_stock_data_with_fallback(symbol, period='1y', interval='1d'):
                 
             if not data.empty:
                 return data, bse_symbol
-        except:
+        except Exception as e:
+            print(f"BSE fetch failed for {bse_symbol}: {e}")
             pass
     
     # Try without exchange suffix
@@ -149,7 +151,8 @@ def get_stock_data_with_fallback(symbol, period='1y', interval='1d'):
                 
             if not data.empty:
                 return data, test_symbol
-        except:
+        except Exception as e:
+            print(f"Fallback fetch failed for {test_symbol}: {e}")
             continue
     
     # If all fails, return empty DataFrame
@@ -160,30 +163,49 @@ def calculate_advanced_indicators(data):
     if len(data) < 20:
         return data
     
-    # Stochastic Oscillator
-    data['%K'] = ta.stoch(data['High'], data['Low'], data['Close'])['STOCHk_14_3_3']
-    data['%D'] = ta.stoch(data['High'], data['Low'], data['Close'])['STOCHd_14_3_3']
-    
-    # Williams %R
-    data['Williams_%R'] = ta.willr(data['High'], data['Low'], data['Close'])
-    
-    # Commodity Channel Index
-    data['CCI'] = ta.cci(data['High'], data['Low'], data['Close'])
-    
-    # Money Flow Index
-    data['MFI'] = ta.mfi(data['High'], data['Low'], data['Close'], data['Volume'])
-    
-    # Average Directional Index
-    data['ADX'] = ta.adx(data['High'], data['Low'], data['Close'])['ADX_14']
-    
-    # Parabolic SAR
-    data['PSAR'] = ta.psar(data['High'], data['Low'])['PSARl_0.02_0.2']
-    
-    # Ichimoku Cloud
-    ichimoku = ta.ichimoku(data['High'], data['Low'], data['Close'])
-    if ichimoku is not None and len(ichimoku.columns) > 0:
-        for col in ichimoku.columns:
-            data[col] = ichimoku[col]
+    try:
+        # Stochastic Oscillator
+        stoch = ta.stoch(data['High'], data['Low'], data['Close'])
+        if stoch is not None and not stoch.empty:
+            if 'STOCHk_14_3_3' in stoch.columns:
+                data['%K'] = stoch['STOCHk_14_3_3']
+            if 'STOCHd_14_3_3' in stoch.columns:
+                data['%D'] = stoch['STOCHd_14_3_3']
+        
+        # Williams %R
+        willr = ta.willr(data['High'], data['Low'], data['Close'])
+        if willr is not None:
+            data['Williams_%R'] = willr
+        
+        # Commodity Channel Index
+        cci = ta.cci(data['High'], data['Low'], data['Close'])
+        if cci is not None:
+            data['CCI'] = cci
+        
+        # Money Flow Index
+        mfi = ta.mfi(data['High'], data['Low'], data['Close'], data['Volume'])
+        if mfi is not None:
+            data['MFI'] = mfi
+        
+        # Average Directional Index
+        adx = ta.adx(data['High'], data['Low'], data['Close'])
+        if adx is not None and not adx.empty:
+            if 'ADX_14' in adx.columns:
+                data['ADX'] = adx['ADX_14']
+        
+        # Parabolic SAR
+        psar = ta.psar(data['High'], data['Low'])
+        if psar is not None and not psar.empty:
+            if 'PSARl_0.02_0.2' in psar.columns:
+                data['PSAR'] = psar['PSARl_0.02_0.2']
+        
+        # Ichimoku Cloud
+        ichimoku = ta.ichimoku(data['High'], data['Low'], data['Close'])
+        if ichimoku is not None and not ichimoku.empty:
+            for col in ichimoku.columns:
+                data[col] = ichimoku[col]
+    except Exception as e:
+        print(f"Error calculating advanced indicators: {e}")
     
     return data
 
@@ -747,7 +769,8 @@ def analyze():
         # Calculate technical indicators
         data['RSI'] = ta.rsi(data['Close'])
         macd = ta.macd(data['Close'])
-        data = pd.concat([data, macd], axis=1)
+        if macd is not None and not macd.empty:
+            data = pd.concat([data, macd], axis=1)
         data['EMA_20'] = ta.ema(data['Close'], length=20)
         data['EMA_50'] = ta.ema(data['Close'], length=50)
         data['EMA_200'] = ta.ema(data['Close'], length=200)
@@ -756,7 +779,7 @@ def analyze():
         
         # Add Bollinger Bands
         bb = ta.bbands(data['Close'])
-        if bb is not None:
+        if bb is not None and not bb.empty:
             data = pd.concat([data, bb], axis=1)
         
         # Calculate advanced indicators
@@ -768,8 +791,23 @@ def analyze():
             return jsonify({"error": "Insufficient data for analysis"}), 400
             
         data['Target'] = data['Close'].shift(-1)
-        features = data[['Close', 'RSI', 'MACD_12_26_9', 'EMA_20', 'EMA_50', 'VWAP', 'ATR']].iloc[:-1]
+        
+        # Select available features
+        feature_columns = ['Close']
+        for col in ['RSI', 'MACD_12_26_9', 'EMA_20', 'EMA_50', 'VWAP', 'ATR']:
+            if col in data.columns and not data[col].isna().all():
+                feature_columns.append(col)
+        
+        features = data[feature_columns].iloc[:-1]
         targets = data['Target'].iloc[:-1]
+        
+        # Remove rows with NaN values
+        valid_indices = features.dropna().index
+        features = features.loc[valid_indices]
+        targets = targets.loc[valid_indices]
+        
+        if len(features) < 10:
+            return jsonify({"error": "Insufficient clean data for prediction"}), 400
         
         # Train prediction model (with caching)
         model_key = f"model_{interval}"
@@ -879,9 +917,9 @@ def analyze():
                 "MFI": round(data['MFI'].iloc[-1], 2) if 'MFI' in data and not pd.isna(data['MFI'].iloc[-1]) else None,
                 "ADX": round(data['ADX'].iloc[-1], 2) if 'ADX' in data and not pd.isna(data['ADX'].iloc[-1]) else None,
                 "PSAR": round(data['PSAR'].iloc[-1], 2) if 'PSAR' in data and not pd.isna(data['PSAR'].iloc[-1]) else None,
-                "BB_Upper": round(data['BBU_20_2.0'].iloc[-1], 2) if 'BBU_20_2.0' in data and not pd.isna(data['BBU_20_2.0'].iloc[-1]) else None,
-                "BB_Middle": round(data['BBM_20_2.0'].iloc[-1], 2) if 'BBM_20_2.0' in data and not pd.isna(data['BBM_20_2.0'].iloc[-1]) else None,
-                "BB_Lower": round(data['BBL_20_2.0'].iloc[-1], 2) if 'BBL_20_2.0' in data and not pd.isna(data['BBL_20_2.0'].iloc[-1]) else None,
+                "BB_Upper": round(data['BBU_20_2.0'].iloc[-1], 2) if 'BBU_20_2.0' in data.columns and not pd.isna(data['BBU_20_2.0'].iloc[-1]) else None,
+                "BB_Middle": round(data['BBM_20_2.0'].iloc[-1], 2) if 'BBM_20_2.0' in data.columns and not pd.isna(data['BBM_20_2.0'].iloc[-1]) else None,
+                "BB_Lower": round(data['BBL_20_2.0'].iloc[-1], 2) if 'BBL_20_2.0' in data.columns and not pd.isna(data['BBL_20_2.0'].iloc[-1]) else None,
             },
             "tradingview_summary": tv_summary,
             "news_sentiment": news_data,
