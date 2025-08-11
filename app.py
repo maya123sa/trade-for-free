@@ -1084,7 +1084,10 @@ def stock_screener():
                     meets_criteria = False
                 
                 if meets_criteria:
-                    price_change = ((current_price - data['Close'].iloc[-2]) / data['Close'].iloc[-2]) * 100
+                    if len(data) >= 2:
+                        price_change = ((current_price - data['Close'].iloc[-2]) / data['Close'].iloc[-2]) * 100
+                    else:
+                        price_change = 0
                     
                     screened_stocks.append({
                         'symbol': stock,
