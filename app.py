@@ -12,6 +12,7 @@ import time
 from io import BytesIO
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+from flask import render_template
 import yfinance as yf
 import pandas as pd
 import pandas_ta as ta
@@ -33,6 +34,10 @@ import pytz
 
 app = Flask(__name__)
 CORS(app)
+
+# Configure template folder
+app.template_folder = 'templates'
+app.static_folder = 'public'
 
 # Enhanced symbol mapping for Indian stocks
 INDIAN_STOCK_SYMBOLS = {
@@ -404,7 +409,13 @@ def get_market_hours_info():
 # Add root route to prevent 404 errors
 @app.route('/')
 def home():
-    return "Indian Trade Analyst API is running. Use /analyze?symbol=SYMBOL&interval=INTERVAL"
+    """Serve the main dashboard"""
+    return render_template('index.html')
+
+@app.route('/dashboard')
+def dashboard():
+    """Alternative dashboard route"""
+    return render_template('index.html')
 
 # Enhanced interval mapping
 INTERVAL_MAP = {

@@ -282,38 +282,37 @@
         document.addEventListener('DOMContentLoaded', function() {
             loadMarketStatus();
             
+            // Load initial analysis for RELIANCE
+            setTimeout(() => {
+                analyzeStock('RELIANCE');
+            }, 1000);
+            
             // Auto-refresh market status every 30 seconds
             setInterval(loadMarketStatus, 30000);
         });
         
         async function loadMarketStatus() {
             try {
-                // Mock market status for demo
-                const now = new Date();
-                const istTime = new Date(now.toLocaleString("en-US", {timeZone: "Asia/Kolkata"}));
-                const hour = istTime.getHours();
-                const minute = istTime.getMinutes();
+                // Get real market status from Python backend
+                const response = await fetch('/analyze?symbol=NIFTY');
+                const data = await response.json();
                 
-                let status, statusText, statusClass;
+                const marketHours = data.market_hours || {};
+                const status = marketHours.status || 'UNKNOWN';
+                const message = marketHours.message || 'Loading...';
+                const currentTime = marketHours.current_time || new Date().toLocaleTimeString();
                 
-                if (hour === 9 && minute < 15) {
-                    status = 'PRE_OPEN';
-                    statusText = 'Pre-Market Session';
-                    statusClass = 'market-status';
-                } else if ((hour === 9 && minute >= 15) || (hour > 9 && hour < 15) || (hour === 15 && minute < 30)) {
-                    status = 'OPEN';
-                    statusText = 'Market Open';
+                let statusClass = 'market-status';
+                if (status === 'OPEN' || status === 'PRE_OPEN') {
                     statusClass = 'market-status';
                 } else {
-                    status = 'CLOSED';
-                    statusText = 'Market Closed';
                     statusClass = 'market-status closed';
                 }
                 
                 document.getElementById('marketStatus').innerHTML = `
                     <div class="${statusClass}">
-                        <h3><i class="fas fa-clock"></i> ${statusText}</h3>
-                        <p class="mb-0">Current Time: ${istTime.toLocaleTimeString()} IST</p>
+                        <h3><i class="fas fa-clock"></i> ${message}</h3>
+                        <p class="mb-0">Current Time: ${currentTime}</p>
                         <small>NSE/BSE Trading Hours: 9:15 AM - 3:30 PM</small>
                     </div>
                 `;
@@ -340,7 +339,7 @@
             `;
             
             try {
-                const response = await fetch(`/api/analyze/${targetSymbol}`);
+                const response = await fetch(`/analyze?symbol=${targetSymbol}&advanced=true`);
                 const data = await response.json();
                 
                 if (data.error) {
@@ -360,37 +359,56 @@
         }
         
         function displayAnalysisResults(data) {
-            const analysis = data.analysis || {};
-            const signals = data.signals || {};
-            const overall = signals.overall || {};
+            // Extract data from Python backend response
+            const currentPrice = data.current_price || 0;
+            const predictedPrice = data.predicted_price || 0;
+            const priceChange = data.price_change || 0;
+            const priceChangePct = data.price_change_pct || 0;
+            const indicators = data.technical_indicators || {};
+            const tvSummary = data.tradingview_summary || {};
+            const advancedAnalysis = data.advanced_analysis || {};
             
+            // Determine signal based on TradingView recommendation
+            const recommendation = tvSummary.recommendation || 'NEUTRAL';
             let signalClass = 'signal-neutral';
             let signalIcon = 'fas fa-minus';
             
-            if (overall.signal && overall.signal.includes('BUY')) {
+            if (recommendation.includes('BUY')) {
                 signalClass = 'signal-buy';
                 signalIcon = 'fas fa-arrow-up';
-            } else if (overall.signal && overall.signal.includes('SELL')) {
+            } else if (recommendation.includes('SELL')) {
                 signalClass = 'signal-sell';
                 signalIcon = 'fas fa-arrow-down';
             }
+            
+            // Calculate confidence based on buy/sell signals
+            const totalSignals = (tvSummary.buy_signals || 0) + (tvSummary.sell_signals || 0) + (tvSummary.neutral_signals || 0);
+            const confidence = totalSignals > 0 ? Math.round(((tvSummary.buy_signals || 0) / totalSignals) * 100) : 50;
             
             const html = `
                 <div class="stock-card">
                     <div class="row">
                         <div class="col-md-6">
                             <h3>${data.symbol}</h3>
-                            <div class="indicator-value">₹${analysis.current_price || 'N/A'}</div>
+                            <div class="indicator-value">₹${currentPrice.toFixed(2)}</div>
+                            <div class="text-muted">
+                                Change: <span style="color: ${priceChangePct >= 0 ? 'green' : 'red'}">
+                                    ${priceChangePct >= 0 ? '+' : ''}${priceChangePct.toFixed(2)}% (₹${priceChange.toFixed(2)})
+                                </span>
+                            </div>
                             <span class="signal-badge ${signalClass}">
-                                <i class="${signalIcon}"></i> ${overall.signal || 'NEUTRAL'}
+                                <i class="${signalIcon}"></i> ${recommendation}
                             </span>
                         </div>
                         <div class="col-md-6 text-end">
                             <div class="mb-2">
-                                <strong>Confidence:</strong> ${overall.confidence || 0}%
+                                <strong>Predicted Price:</strong> ₹${predictedPrice.toFixed(2)}
                             </div>
                             <div class="mb-2">
-                                <strong>Market Status:</strong> ${data.market_status?.status || 'N/A'}
+                                <strong>Confidence:</strong> ${confidence}%
+                            </div>
+                            <div class="mb-2">
+                                <strong>Market Status:</strong> ${data.market_hours?.status || 'N/A'}
                             </div>
                         </div>
                     </div>
@@ -399,19 +417,20 @@
                 <div class="row">
                     <div class="col-md-6">
                         <div class="stock-card">
-                            <h5><i class="fas fa-chart-line"></i> SuperTrend Analysis</h5>
+                            <h5><i class="fas fa-chart-line"></i> Technical Indicators</h5>
                             <div class="row">
-                                <div class="col-6">
-                                    <strong>Value:</strong> ₹${analysis.supertrend?.value || 'N/A'}
+                                <div class="col-4">
+                                    <small>RSI</small><br>
+                                    <strong>${indicators.RSI ? indicators.RSI.toFixed(2) : 'N/A'}</strong>
                                 </div>
-                                <div class="col-6">
-                                    <strong>Direction:</strong> ${analysis.supertrend?.direction || 'N/A'}
+                                <div class="col-4">
+                                    <small>MACD</small><br>
+                                    <strong>${indicators.MACD ? indicators.MACD.toFixed(4) : 'N/A'}</strong>
                                 </div>
-                            </div>
-                            <div class="mt-2">
-                                <span class="badge ${analysis.supertrend?.signal === 'BUY' ? 'bg-success' : 'bg-danger'}">
-                                    ${analysis.supertrend?.signal || 'N/A'}
-                                </span>
+                                <div class="col-4">
+                                    <small>ATR</small><br>
+                                    <strong>${indicators.ATR ? indicators.ATR.toFixed(2) : 'N/A'}</strong>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -422,15 +441,15 @@
                             <div class="row">
                                 <div class="col-4">
                                     <small>EMA 20</small><br>
-                                    <strong>₹${analysis.moving_averages?.ema_20 || 'N/A'}</strong>
+                                    <strong>₹${indicators.EMA_20 ? indicators.EMA_20.toFixed(2) : 'N/A'}</strong>
                                 </div>
                                 <div class="col-4">
                                     <small>SMA 50</small><br>
-                                    <strong>₹${analysis.moving_averages?.sma_50 || 'N/A'}</strong>
+                                    <strong>₹${indicators.EMA_50 ? indicators.EMA_50.toFixed(2) : 'N/A'}</strong>
                                 </div>
                                 <div class="col-4">
                                     <small>SMA 200</small><br>
-                                    <strong>₹${analysis.moving_averages?.sma_200 || 'N/A'}</strong>
+                                    <strong>₹${indicators.EMA_200 ? indicators.EMA_200.toFixed(2) : 'N/A'}</strong>
                                 </div>
                             </div>
                         </div>
@@ -440,19 +459,19 @@
                 <div class="row">
                     <div class="col-md-6">
                         <div class="stock-card">
-                            <h5><i class="fas fa-crosshairs"></i> Pivot Points</h5>
+                            <h5><i class="fas fa-crosshairs"></i> Bollinger Bands</h5>
                             <div class="row">
                                 <div class="col-4">
-                                    <small>R1</small><br>
-                                    <strong>₹${analysis.pivot_points?.R1 || 'N/A'}</strong>
+                                    <small>Upper</small><br>
+                                    <strong>₹${indicators.BB_Upper ? indicators.BB_Upper.toFixed(2) : 'N/A'}</strong>
                                 </div>
                                 <div class="col-4">
-                                    <small>PP</small><br>
-                                    <strong>₹${analysis.pivot_points?.PP || 'N/A'}</strong>
+                                    <small>Middle</small><br>
+                                    <strong>₹${indicators.BB_Middle ? indicators.BB_Middle.toFixed(2) : 'N/A'}</strong>
                                 </div>
                                 <div class="col-4">
-                                    <small>S1</small><br>
-                                    <strong>₹${analysis.pivot_points?.S1 || 'N/A'}</strong>
+                                    <small>Lower</small><br>
+                                    <strong>₹${indicators.BB_Lower ? indicators.BB_Lower.toFixed(2) : 'N/A'}</strong>
                                 </div>
                             </div>
                         </div>
@@ -460,24 +479,31 @@
                     
                     <div class="col-md-6">
                         <div class="stock-card">
-                            <h5><i class="fas fa-volume-up"></i> Volume Profile</h5>
+                            <h5><i class="fas fa-volume-up"></i> Advanced Indicators</h5>
                             <div class="row">
                                 <div class="col-4">
-                                    <small>POC</small><br>
-                                    <strong>₹${analysis.volume_profile?.POC || 'N/A'}</strong>
+                                    <small>Stoch %K</small><br>
+                                    <strong>${indicators.Stoch_K ? indicators.Stoch_K.toFixed(2) : 'N/A'}</strong>
                                 </div>
                                 <div class="col-4">
-                                    <small>VAH</small><br>
-                                    <strong>₹${analysis.volume_profile?.VAH || 'N/A'}</strong>
+                                    <small>Williams %R</small><br>
+                                    <strong>${indicators.Williams_R ? indicators.Williams_R.toFixed(2) : 'N/A'}</strong>
                                 </div>
                                 <div class="col-4">
-                                    <small>VAL</small><br>
-                                    <strong>₹${analysis.volume_profile?.VAL || 'N/A'}</strong>
+                                    <small>CCI</small><br>
+                                    <strong>${indicators.CCI ? indicators.CCI.toFixed(2) : 'N/A'}</strong>
                                 </div>
                             </div>
                         </div>
                     </div>
                 </div>
+                
+                ${data.chart_image ? `
+                <div class="chart-container">
+                    <h5><i class="fas fa-chart-area"></i> Technical Chart</h5>
+                    <img src="data:image/png;base64,${data.chart_image}" class="img-fluid" alt="Technical Chart">
+                </div>
+                ` : ''}
             `;
             
             document.getElementById('analysisResults').innerHTML = html;
@@ -493,7 +519,7 @@
             `;
             
             try {
-                const response = await fetch('/api/orb-scanner');
+                const response = await fetch('/screener?min_rsi=30&max_rsi=70&min_volume_ratio=1.5');
                 const data = await response.json();
                 
                 if (data.error) {
@@ -513,39 +539,41 @@
         }
         
         function displayORBResults(opportunities) {
-            if (!opportunities || opportunities.length === 0) {
+            const stocks = opportunities.screened_stocks || [];
+            
+            if (!stocks || stocks.length === 0) {
                 document.getElementById('orbResults').innerHTML = `
                     <div class="alert alert-info">
                         <i class="fas fa-info-circle"></i>
-                        No ORB opportunities found at this time.
+                        No opportunities found at this time.
                     </div>
                 `;
                 return;
             }
             
-            let html = '<div class="orb-alert"><h5><i class="fas fa-fire"></i> ORB Opportunities Found!</h5></div>';
+            let html = '<div class="orb-alert"><h5><i class="fas fa-fire"></i> Stock Opportunities Found!</h5></div>';
             
-            opportunities.forEach((orb, index) => {
-                let statusClass = 'bg-secondary';
-                if (orb.breakout_status === 'BULLISH_BREAKOUT') statusClass = 'bg-success';
-                else if (orb.breakout_status === 'BEARISH_BREAKOUT') statusClass = 'bg-danger';
+            stocks.forEach((stock, index) => {
+                let statusClass = stock.price_change_pct > 0 ? 'bg-success' : 'bg-danger';
+                const changeText = stock.price_change_pct > 0 ? `+${stock.price_change_pct}%` : `${stock.price_change_pct}%`;
                 
                 html += `
                     <div class="stock-card">
                         <div class="row">
                             <div class="col-md-8">
-                                <h5>${orb.symbol}</h5>
-                                <span class="badge ${statusClass}">${orb.breakout_status}</span>
+                                <h5>${stock.symbol}</h5>
+                                <span class="badge ${statusClass}">${changeText}</span>
                                 <div class="mt-2">
-                                    <strong>Current Price:</strong> ₹${orb.current_price}<br>
-                                    <strong>ORB Range:</strong> ₹${orb.orb_low} - ₹${orb.orb_high}<br>
-                                    <strong>Range Size:</strong> ₹${orb.orb_range}
+                                    <strong>Current Price:</strong> ₹${stock.price}<br>
+                                    <strong>RSI:</strong> ${stock.rsi}<br>
+                                    <strong>Volume Ratio:</strong> ${stock.volume_ratio}x
                                 </div>
                             </div>
                             <div class="col-md-4 text-end">
-                                ${orb.target1 ? `<div><strong>Target 1:</strong> ₹${orb.target1}</div>` : ''}
-                                ${orb.target2 ? `<div><strong>Target 2:</strong> ₹${orb.target2}</div>` : ''}
-                                ${orb.stop_loss ? `<div><strong>Stop Loss:</strong> ₹${orb.stop_loss}</div>` : ''}
+                                <div><strong>Above EMA:</strong> ${stock.above_ema ? 'Yes' : 'No'}</div>
+                                <button class="btn btn-sm btn-primary mt-2" onclick="analyzeStock('${stock.symbol}')">
+                                    Analyze
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -565,7 +593,7 @@
             `;
             
             try {
-                const response = await fetch('/api/sector-heatmap');
+                const response = await fetch('/momentum?symbol=NIFTY');
                 const data = await response.json();
                 
                 if (data.error) {
@@ -585,43 +613,49 @@
         }
         
         function displaySectorHeatmap(data) {
-            if (!data.sectors || data.sectors.length === 0) {
+            const timeframes = data.timeframes || {};
+            
+            if (Object.keys(timeframes).length === 0) {
                 document.getElementById('sectorHeatmap').innerHTML = `
                     <div class="alert alert-info">
                         <i class="fas fa-info-circle"></i>
-                        No sector data available.
+                        No momentum data available.
                     </div>
                 `;
                 return;
             }
             
-            let html = '<div class="sector-heatmap">';
+            let html = `
+                <div class="stock-card">
+                    <h5><i class="fas fa-rocket"></i> ${data.symbol} Momentum Analysis</h5>
+                    <div class="row">
+            `;
             
-            data.sectors.forEach(sector => {
-                const changeText = sector.change_pct > 0 ? `+${sector.change_pct}%` : `${sector.change_pct}%`;
+            Object.entries(timeframes).forEach(([tf, tfData]) => {
+                const color = tfData.momentum_pct > 0 ? '#28a745' : '#dc3545';
+                const changeText = tfData.momentum_pct > 0 ? `+${tfData.momentum_pct}%` : `${tfData.momentum_pct}%`;
+                
                 html += `
-                    <div class="sector-item" style="background-color: ${sector.color}">
-                        <h6>${sector.sector}</h6>
-                        <div class="h4">${changeText}</div>
+                    <div class="col-md-4">
+                        <div class="text-center p-3" style="background-color: ${color}; color: white; border-radius: 10px; margin-bottom: 10px;">
+                            <h6>${tf.toUpperCase()}</h6>
+                            <div class="h5">${changeText}</div>
+                            <small>RSI: ${tfData.rsi || 'N/A'}</small>
+                        </div>
                     </div>
                 `;
             });
             
-            html += '</div>';
+            html += `
+                    </div>
+                </div>
+            `;
             
-            if (data.best_sector && data.worst_sector) {
+            if (data.overall_momentum) {
                 html += `
-                    <div class="row mt-4">
-                        <div class="col-md-6">
-                            <div class="alert alert-success">
-                                <strong>Best Sector:</strong> ${data.best_sector}
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="alert alert-danger">
-                                <strong>Worst Sector:</strong> ${data.worst_sector}
-                            </div>
-                        </div>
+                    <div class="stock-card">
+                        <h5>Overall Momentum: <span class="badge ${data.overall_momentum.includes('Bullish') ? 'bg-success' : 'bg-danger'}">${data.overall_momentum}</span></h5>
+                        <p>Momentum Score: ${data.momentum_score}</p>
                     </div>
                 `;
             }
@@ -647,7 +681,7 @@
             `;
             
             try {
-                const response = await fetch(`/api/option-chain/${symbol}`);
+                const response = await fetch(`/alerts?symbol=${symbol}`);
                 const data = await response.json();
                 
                 if (data.error) {
@@ -667,55 +701,40 @@
         }
         
         function displayOptionChain(data) {
+            const alerts = data.alerts || [];
+            
+            if (alerts.length === 0) {
+                document.getElementById('optionChainResults').innerHTML = `
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle"></i>
+                        No price alerts available for ${data.symbol}.
+                    </div>
+                `;
+                return;
+            }
+            
             const html = `
-                <div class="row">
-                    <div class="col-md-6">
-                        <div class="stock-card">
-                            <h5><i class="fas fa-balance-scale"></i> Put-Call Ratio</h5>
-                            <div class="row">
-                                <div class="col-6">
-                                    <strong>PCR (OI):</strong> ${data.pcr_oi || 'N/A'}
-                                </div>
-                                <div class="col-6">
-                                    <strong>PCR (Volume):</strong> ${data.pcr_volume || 'N/A'}
-                                </div>
-                            </div>
-                            <div class="mt-2">
-                                <small class="text-muted">${data.interpretation || ''}</small>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="col-md-6">
-                        <div class="stock-card">
-                            <h5><i class="fas fa-crosshairs"></i> Key Levels</h5>
-                            <div class="row">
-                                <div class="col-6">
-                                    <strong>Max Pain:</strong> ${data.max_pain || 'N/A'}
-                                </div>
-                                <div class="col-6">
-                                    <strong>Total OI:</strong> ${(data.total_call_oi + data.total_put_oi) || 'N/A'}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+                <div class="stock-card">
+                    <h5><i class="fas fa-bell"></i> Price Alerts for ${data.symbol}</h5>
+                    <p><strong>Current Price:</strong> ₹${data.current_price}</p>
                 </div>
                 
-                <div class="row">
-                    <div class="col-md-6">
-                        <div class="stock-card">
-                            <h5><i class="fas fa-shield-alt"></i> Support Levels</h5>
-                            ${data.support_levels ? data.support_levels.map(level => `<span class="badge bg-success me-1">${level}</span>`).join('') : 'N/A'}
+                ${alerts.map(alert => `
+                    <div class="stock-card">
+                        <div class="row">
+                            <div class="col-md-8">
+                                <h6><i class="fas fa-exclamation-triangle"></i> ${alert.type}</h6>
+                                <p class="mb-1">${alert.message}</p>
+                                <strong>Level: ₹${alert.level}</strong>
+                            </div>
+                            <div class="col-md-4 text-end">
+                                <span class="badge ${alert.type.includes('Resistance') ? 'bg-danger' : alert.type.includes('Support') ? 'bg-success' : 'bg-warning'}">
+                                    ${alert.distance_pct ? `${alert.distance_pct.toFixed(2)}%` : ''}
+                                </span>
+                            </div>
                         </div>
                     </div>
-                    
-                    <div class="col-md-6">
-                        <div class="stock-card">
-                            <h5><i class="fas fa-mountain"></i> Resistance Levels</h5>
-                            ${data.resistance_levels ? data.resistance_levels.map(level => `<span class="badge bg-danger me-1">${level}</span>`).join('') : 'N/A'}
-                        </div>
-                    </div>
-                </div>
+                `).join('')}
             `;
             
             document.getElementById('optionChainResults').innerHTML = html;
