@@ -35,9 +35,20 @@ import pytz
 app = Flask(__name__)
 CORS(app)
 
-# Configure template folder
+# Configure template and static folders
 app.template_folder = 'templates'
 app.static_folder = 'public'
+
+# Add root route to serve the main HTML file
+@app.route('/')
+def index():
+    """Serve the main dashboard"""
+    return render_template('index.html')
+
+@app.route('/dashboard')
+def dashboard():
+    """Alternative dashboard route"""
+    return render_template('index.html')
 
 # Enhanced symbol mapping for Indian stocks
 INDIAN_STOCK_SYMBOLS = {

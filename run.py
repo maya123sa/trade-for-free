@@ -5,13 +5,17 @@ Run script for Indian Stock Technical Analysis Application
 
 import os
 import sys
-from main import app
+from app import app
 from config import config
 
 def create_app():
     """Create and configure the Flask application"""
     config_name = os.environ.get('FLASK_CONFIG', 'default')
-    app.config.from_object(config[config_name])
+    try:
+        app.config.from_object(config[config_name])
+    except KeyError:
+        print(f"Warning: Configuration '{config_name}' not found, using default")
+        app.config.from_object(config['default'])
     
     return app
 
@@ -43,5 +47,11 @@ if __name__ == '__main__':
         print("- Option chain PCR/OI analysis")
         print("- Telegram/WhatsApp alerts")
         print("- Bilingual support (English/Hindi)")
+        print("\nAPI Endpoints:")
+        print("- GET /analyze?symbol=RELIANCE - Stock analysis")
+        print("- GET /screener - Stock screener")
+        print("- GET /momentum?symbol=NIFTY - Momentum analysis")
+        print("- GET /alerts?symbol=RELIANCE - Price alerts")
+        print("- GET /backtest?symbol=RELIANCE&strategy=rsi_macd - Backtest")
         
         application.run(host='0.0.0.0', port=port, debug=True)

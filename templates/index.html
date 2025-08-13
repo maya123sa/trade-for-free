@@ -293,7 +293,7 @@
         
         async function loadMarketStatus() {
             try {
-                // Get real market status from Python backend
+                // Get real market status from Python Flask backend
                 const response = await fetch('/analyze?symbol=NIFTY');
                 const data = await response.json();
                 
@@ -339,6 +339,7 @@
             `;
             
             try {
+                // Call Python Flask backend for analysis
                 const response = await fetch(`/analyze?symbol=${targetSymbol}&advanced=true`);
                 const data = await response.json();
                 

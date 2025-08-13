@@ -460,7 +460,7 @@
             resultsDiv.style.display = 'block';
             resultsDiv.innerHTML = '<div class="loading">Analyzing ' + symbol + '...</div>';
             
-            // Call Python backend API
+            // Call Python Flask backend API
             fetch(`/analyze?symbol=${symbol}&advanced=true`)
                 .then(response => response.json())
                 .then(data => {
@@ -504,7 +504,7 @@
             resultsDiv.style.display = 'block';
             resultsDiv.innerHTML = '<div class="loading">Screening stocks...</div>';
             
-            // Call Python backend screener
+            // Call Python Flask backend screener
             fetch(`/screener?min_rsi=${minRsi}&max_rsi=${maxRsi}&min_volume_ratio=1.5`)
                 .then(response => response.json())
                 .then(data => {
@@ -547,7 +547,7 @@
             resultsDiv.style.display = 'block';
             resultsDiv.innerHTML = '<div class="loading">Analyzing momentum...</div>';
             
-            // Call Python backend momentum analysis
+            // Call Python Flask backend momentum analysis
             fetch(`/momentum?symbol=${symbol}`)
                 .then(response => response.json())
                 .then(data => {
@@ -588,7 +588,7 @@
             resultsDiv.style.display = 'block';
             resultsDiv.innerHTML = '<div class="loading">Getting alert levels...</div>';
             
-            // Call Python backend alerts
+            // Call Python Flask backend alerts
             fetch(`/alerts?symbol=${symbol}`)
                 .then(response => response.json())
                 .then(data => {
@@ -627,7 +627,7 @@
             resultsDiv.style.display = 'block';
             resultsDiv.innerHTML = '<div class="loading">Running backtest...</div>';
             
-            // Call Python backend backtest
+            // Call Python Flask backend backtest
             fetch(`/backtest?symbol=${symbol}&strategy=${strategy}`)
                 .then(response => response.json())
                 .then(data => {
@@ -656,7 +656,7 @@
             resultsDiv.style.display = 'block';
             resultsDiv.innerHTML = '<div class="loading">Loading sector heatmap...</div>';
             
-            // Use momentum analysis as sector alternative
+            // Call Python Flask backend for momentum analysis as sector alternative
             fetch('/momentum?symbol=NIFTY')
                 .then(response => response.json())
                 .then(data => {
@@ -686,7 +686,7 @@
             resultsDiv.style.display = 'block';
             resultsDiv.innerHTML = '<div class="loading">Scanning ORB opportunities...</div>';
             
-            // Use screener as ORB alternative
+            // Call Python Flask backend screener as ORB alternative
             fetch('/screener?min_rsi=30&max_rsi=70&min_volume_ratio=1.5')
                 .then(response => response.json())
                 .then(data => {
@@ -715,7 +715,7 @@
             resultsDiv.style.display = 'block';
             resultsDiv.innerHTML = '<div class="loading">Loading FII/DII activity...</div>';
             
-            // Mock FII/DII data for now
+            // Note: FII/DII data feature will be implemented when connected to data source
             setTimeout(() => {
                 resultsDiv.innerHTML = `
                     <h4>FII/DII Activity</h4>
