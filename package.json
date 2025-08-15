@@ -6,7 +6,7 @@
   "scripts": {
     "build": "echo 'Build completed'",
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "python run.py"
   },
   "keywords": [
     "indian-stocks",
